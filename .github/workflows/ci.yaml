@@ -75,7 +75,6 @@ jobs:
           name: docker-targets-build-${{ env.PLATFORM_PAIR }}
           path: target/${{ matrix.platform.target }}.tar
   docker-publish:
-deneme
     runs-on: ubuntu-latest
     needs: [docker-targets-build]
     if: github.event_name == 'push' && github.ref_type == 'tag'
@@ -313,7 +312,6 @@ deneme
           detailed_summary: true
           include_passed: true
   worker-tests:
-deneme
     needs: [worker-tests-group1]
     runs-on: ubuntu-latest
     strategy:
@@ -597,7 +595,6 @@ deneme
 
   publish-slack-notification:
     if: ${{ always() && startsWith(github.ref, 'refs/tags/v') }}
-  deneme
     needs: [publish, docker-publish, publish_cli_binaries]
     runs-on: ubuntu-latest
     steps:
