@@ -1,5 +1,5 @@
-use crate::api::definition::types::{ApiDefinition, Route, HttpMethod, BindingType}; // Add BindingType here
-use golem_wasm_ast::analysis::model::AnalysedType;
+use crate::api::definition::types::{ApiDefinition, BindingType};
+use golem_wasm_ast::analysis::AnalysedType;
 
 pub fn validate_api_definition(api: &ApiDefinition) -> Result<(), String> {
     for route in &api.routes {

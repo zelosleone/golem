@@ -1,8 +1,6 @@
 use super::types::*;
-use crate::api::definition::{
-    types::{ApiDefinition, Route, HttpMethod, BindingType},
-};
-use crate::patterns::{AllPathPatterns, PathPattern}; // Updated import path
+use crate::api::definition::types::{ApiDefinition, Route, HttpMethod, BindingType};
+use crate::api::definition::patterns::{AllPathPatterns, PathPattern};
 use std::collections::HashMap;
 use heck::ToSnakeCase; 
 

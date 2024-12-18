@@ -214,6 +214,32 @@ pub enum BindingType {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuthConfig {
+    pub enabled: bool,
+    pub provider: String,
+    pub scopes: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CacheConfig {
+    pub max_age: Option<u32>,
+    pub must_revalidate: Option<bool>,
+    pub no_cache: Option<bool>,
+    pub no_store: Option<bool>,
+    pub private: Option<bool>,
+    pub public: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CorsConfig {
+    pub allowed_origins: Option<Vec<String>>,
+    pub allowed_methods: Option<Vec<String>>,
+    pub allowed_headers: Option<Vec<String>>,
+    pub allow_credentials: Option<bool>,
+    pub max_age: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BindingOptions {
     pub auth: Option<AuthConfig>,
     pub cache: Option<CacheConfig>,
