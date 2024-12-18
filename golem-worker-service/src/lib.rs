@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::api::make_open_api_service;
-use crate::api::types::ApiServices; // Update the import path
+use crate::api::ApiServices;
 use crate::service::Services;
 use anyhow::{anyhow, Context};
 use golem_common::config::DbConfig;

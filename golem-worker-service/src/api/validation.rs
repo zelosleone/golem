@@ -1,5 +1,8 @@
 use crate::api::definition::types::{ApiDefinition, BindingType};
-use golem_wasm_ast::analysis::AnalysedType;
+use golem_wasm_ast::analysis::{
+    AnalysedType,
+    TypeF32, TypeF64, TypeBool, TypeList, TypeOption, TypeRecord, TypeResult
+};
 
 pub fn validate_api_definition(api: &ApiDefinition) -> Result<(), String> {
     for route in &api.routes {
@@ -18,16 +21,17 @@ pub fn validate_api_definition(api: &ApiDefinition) -> Result<(), String> {
 
 fn parse_type(type_str: &str) -> Result<AnalysedType, String> {
     match type_str {
-        "string" => Ok(AnalysedType::String),
-        "i32" => Ok(AnalysedType::I32),
-        "i64" => Ok(AnalysedType::I64),
-        "f32" => Ok(AnalysedType::F32),
-        "f64" => Ok(AnalysedType::F64),
-        "bool" => Ok(AnalysedType::Bool),
-        "void" => Ok(AnalysedType::Void),
+        "string" => Ok(AnalysedType::Primitive(golem_wasm_ast::analysis::TypePrimitive::String)),
+        "i32" => Ok(AnalysedType::Primitive(golem_wasm_ast::analysis::TypePrimitive::I32)),
+        "i64" => Ok(AnalysedType::Primitive(golem_wasm_ast::analysis::TypePrimitive::I64)),
+        "f32" => Ok(AnalysedType::F32(TypeF32)),
+        "f64" => Ok(AnalysedType::F64(TypeF64)),
+        "bool" => Ok(AnalysedType::Bool(TypeBool)),
+        "void" => Ok(AnalysedType::Unit),
         t if t.starts_with("list<") => {
             let inner_type = t.trim_start_matches("list<").trim_end_matches('>');
-            Ok(AnalysedType::List(Box::new(parse_type(inner_type)?)))
+            let inner = parse_type(inner_type)?;
+            Ok(AnalysedType::List(TypeList { inner: Box::new(inner) }))
         },
         t if t.starts_with("record{") && t.ends_with("}") => {
             let fields_str = t.trim_start_matches("record{").trim_end_matches('}');
@@ -44,19 +48,22 @@ fn parse_type(type_str: &str) -> Result<AnalysedType, String> {
                 }
             }
             
-            Ok(AnalysedType::Record(fields))
+            Ok(AnalysedType::Record(TypeRecord { fields }))
         },
         t if t.starts_with("option<") => {
             let inner_type = t.trim_start_matches("option<").trim_end_matches('>');
-            Ok(AnalysedType::Option(Box::new(parse_type(inner_type)?)))
+            let inner = parse_type(inner_type)?;
+            Ok(AnalysedType::Option(TypeOption { inner: Box::new(inner) }))
         },
         t if t.starts_with("result<") && t.ends_with(">") => {
             let types_str = t.trim_start_matches("result<").trim_end_matches('>');
             if let Some((ok_type, err_type)) = types_str.split_once(',') {
-                Ok(AnalysedType::Result {
-                    ok: Box::new(parse_type(ok_type.trim())?),
-                    err: Box::new(parse_type(err_type.trim())?),
-                })
+                let ok = parse_type(ok_type.trim())?;
+                let err = parse_type(err_type.trim())?;
+                Ok(AnalysedType::Result(TypeResult {
+                    ok: Box::new(ok),
+                    err: Box::new(err),
+                }))
             } else {
                 Err(format!("Invalid result type format: {}", t))
             }
@@ -67,8 +74,8 @@ fn parse_type(type_str: &str) -> Result<AnalysedType, String> {
 }
 
 fn validate_wit_binding_types(
-    input_type: &AnalysedType,
-    output_type: &AnalysedType
+    _input_type: &AnalysedType,
+    _output_type: &AnalysedType
 ) -> Result<(), String> {
     // Validation handled by WIT type system
     Ok(())
