@@ -8,9 +8,8 @@ pub mod openapi;
 pub mod definition;
 pub mod validation;
 
-
-
 use crate::api::worker::WorkerApi;
+use crate::api::types::ApiServices;
 use crate::service::Services;
 use golem_worker_service_base::api::CustomHttpRequestApi;
 use golem_worker_service_base::api::HealthcheckApi;
@@ -18,20 +17,16 @@ use poem::endpoint::PrometheusExporter;
 use poem::{get, EndpointExt};
 use poem_openapi::OpenApiService;
 use prometheus::Registry;
-pub use types::*;
 
-pub use definition::*;
-pub use openapi::OpenAPIConverter;
-pub use openapi::validate_openapi;
-pub use openapi::OpenAPIError;
-
-pub type ApiServices = (
-    WorkerApi,
-    api_definition::RegisterApiDefinitionApi,
-    api_deployment::ApiDeploymentApi,
-    security_scheme::SecuritySchemeApi,
-    HealthcheckApi,
-);
+pub use types::{
+    OpenAPISpec, Info, PathItem, Operation, Parameter, Schema, MediaType,
+    Response, Components, SecurityScheme, SecurityRequirement
+};
+pub use definition::types::{
+    ApiDefinition, Route, HttpMethod, BindingType, BindingOptions,
+    FileServerOptions, SwaggerUIOptions
+};
+pub use openapi::{OpenAPIConverter, validate_openapi, OpenAPIError};
 
 pub fn combined_routes(prometheus_registry: Registry, services: &Services) -> poem::Route {
     let api_service = make_open_api_service(services);

@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use golem_wasm_ast::analysis::analysed_type::AnalysedType;
+
+// Remove AnalysedType import since it's private
+// use golem_wasm_ast::analysis::analysed_type::AnalysedType;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpenAPISpec {
@@ -193,8 +195,8 @@ pub struct SecurityRequirement(HashMap<String, Vec<String>>);
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum BindingType {
     Default {
-        input_type: AnalysedType,
-        output_type: AnalysedType,
+        input_type: String,  // Changed from AnalysedType to String
+        output_type: String, // Changed from AnalysedType to String
         options: Option<BindingOptions>,
     },
     FileServer {
