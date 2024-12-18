@@ -1,8 +1,9 @@
 use crate::api::definition::types::{ApiDefinition, BindingType};
 use golem_wasm_ast::analysis::{
-    AnalysedType,
-    TypeF32, TypeF64, TypeBool, TypeList, TypeOption, TypeRecord, TypeResult
+    AnalysedType, TypeF32, TypeF64, TypeBool, TypeList, TypeOption, 
+    TypeRecord, TypeResult, NameTypePair
 };
+use golem_wasm_ast::analysis::protobuf::TypePrimitive;
 
 pub fn validate_api_definition(api: &ApiDefinition) -> Result<(), String> {
     for route in &api.routes {
@@ -21,13 +22,13 @@ pub fn validate_api_definition(api: &ApiDefinition) -> Result<(), String> {
 
 fn parse_type(type_str: &str) -> Result<AnalysedType, String> {
     match type_str {
-        "string" => Ok(AnalysedType::Primitive(golem_wasm_ast::analysis::TypePrimitive::String)),
-        "i32" => Ok(AnalysedType::Primitive(golem_wasm_ast::analysis::TypePrimitive::I32)),
-        "i64" => Ok(AnalysedType::Primitive(golem_wasm_ast::analysis::TypePrimitive::I64)),
+        "string" => Ok(AnalysedType::String(TypePrimitive::String)),
+        "i32" => Ok(AnalysedType::I32(TypePrimitive::I32)),
+        "i64" => Ok(AnalysedType::I64(TypePrimitive::I64)),
         "f32" => Ok(AnalysedType::F32(TypeF32)),
         "f64" => Ok(AnalysedType::F64(TypeF64)),
         "bool" => Ok(AnalysedType::Bool(TypeBool)),
-        "void" => Ok(AnalysedType::Unit),
+        "void" => Ok(AnalysedType::Void),
         t if t.starts_with("list<") => {
             let inner_type = t.trim_start_matches("list<").trim_end_matches('>');
             let inner = parse_type(inner_type)?;
@@ -39,10 +40,10 @@ fn parse_type(type_str: &str) -> Result<AnalysedType, String> {
             
             for field in fields_str.split(',').map(str::trim) {
                 if let Some((name, type_str)) = field.split_once(':') {
-                    fields.push((
-                        name.trim().to_string(),
-                        parse_type(type_str.trim())?
-                    ));
+                    fields.push(NameTypePair {
+                        name: name.trim().to_string(),
+                        type_: parse_type(type_str.trim())?
+                    });
                 } else {
                     return Err(format!("Invalid record field format: {}", field));
                 }
@@ -61,14 +62,13 @@ fn parse_type(type_str: &str) -> Result<AnalysedType, String> {
                 let ok = parse_type(ok_type.trim())?;
                 let err = parse_type(err_type.trim())?;
                 Ok(AnalysedType::Result(TypeResult {
-                    ok: Box::new(ok),
-                    err: Box::new(err),
+                    ok: Some(Box::new(ok)),
+                    err: Some(Box::new(err)),
                 }))
             } else {
                 Err(format!("Invalid result type format: {}", t))
             }
         },
-        // Add any custom type handling here if needed
         _ => Err(format!("Unsupported type: {}", type_str))
     }
 }
