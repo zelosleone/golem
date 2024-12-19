@@ -1,5 +1,9 @@
 use super::types::{OpenAPISpec, Schema, PathItem, ParameterLocation};
 use std::collections::HashMap;
+use super::error::OpenAPIError;
+use crate::api::definition::patterns::{AllPathPatterns, PathPattern};
+use openapiv3::{Schema, Operation};
+use tracing::warn;
 
 pub fn validate_openapi(spec: &OpenAPISpec) -> Result<(), String> {
     validate_paths(&spec.paths)?;
@@ -95,4 +99,85 @@ fn validate_schema_ref(_key: &String, reference: &String) -> Result<(), String> 
         ));
    }
       Ok(())
+}
+
+pub(crate) fn validate_path_pattern(path: &str) -> Result<(), OpenAPIError> {
+    match AllPathPatterns::parse(path) {
+        Ok(pattern) => {
+            for p in pattern.path_patterns {
+                match p {
+                    PathPattern::Var(info) => {
+                        if !validate_parameter_name(&info.key_name) {
+                            return Err(OpenAPIError::ValidationFailed(
+                                format!("Invalid path parameter name: {}", info.key_name)
+                            ));
+                        }
+                    },
+                    PathPattern::CatchAllVar(info) => {
+                        if !validate_catch_all_name(&info.key_name) {
+                            return Err(OpenAPIError::ValidationFailed(
+                                format!("Invalid catch-all parameter name: {}", info.key_name)
+                            ));
+                        }
+                    },
+                    _ => {}
+                }
+            }
+            Ok(())
+        },
+        Err(e) => {
+            warn!("Invalid path pattern: {}", e);
+            Err(OpenAPIError::ValidationFailed(format!("Invalid path pattern: {}", e)))
+        }
+    }
+}
+
+fn validate_parameter_name(name: &str) -> bool {
+    !name.is_empty() && 
+    name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') &&
+    !name.starts_with('_') &&
+    !name.ends_with('_')
+}
+
+fn validate_catch_all_name(name: &str) -> bool {
+    validate_parameter_name(name) && !name.contains("__")
+}
+
+pub(crate) fn validate_operation(operation: &Operation) -> Result<(), OpenAPIError> {
+    // Must have at least one response
+    if operation.responses.is_empty() {
+        return Err(OpenAPIError::ValidationFailed("Operation must have at least one response".into()));
+    }
+
+    // Validate parameters
+    if let Some(params) = &operation.parameters {
+        for param in params {
+            if let openapiv3::ReferenceOr::Item(param) = param {
+                validate_parameter_schema(&param.parameter_data.format)?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_parameter_schema(schema: &Schema) -> Result<(), OpenAPIError> {
+    match schema {
+        Schema::Type(t) => {
+            match t {
+                openapiv3::Type::String(_) |
+                openapiv3::Type::Number(_) |
+                openapiv3::Type::Integer(_) |
+                openapiv3::Type::Boolean {} => Ok(()),
+                _ => {
+                    warn!("Unsupported parameter schema type");
+                    Err(OpenAPIError::ValidationFailed("Unsupported parameter schema type".into()))
+                }
+            }
+        },
+        _ => {
+            warn!("Only simple types are supported for parameters");
+            Err(OpenAPIError::ValidationFailed("Only simple types are supported for parameters".into()))
+        }
+    }
 }

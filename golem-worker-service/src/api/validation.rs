@@ -1,19 +1,16 @@
 use crate::api::definition::types::{ApiDefinition, BindingType};
 use golem_wasm_ast::analysis::{
     AnalysedType, TypeStr, TypeI32, TypeI64, TypeF32, TypeF64, TypeBool, 
-    TypeList, TypeOption, TypeRecord, TypeResult, NameTypePair, TypeVoid
+    TypeList, TypeOption, TypeRecord, TypeResult, NameTypePair, TypeVoid,
+    TypeConstraint, TypeValidation
 };
 
 pub fn validate_api_definition(api: &ApiDefinition) -> Result<(), String> {
     for route in &api.routes {
-        match &route.binding {
-            BindingType::Default { input_type, output_type, function_name: _ } => {
-                // Convert string types to AnalysedType for validation
-                let input = parse_type(input_type)?;
-                let output = parse_type(output_type)?;
-                validate_wit_binding_types(&input, &output)?;
-            }
-            _ => {}
+        if let BindingType::Default { input_type, output_type, .. } = &route.binding {
+            let input = parse_type(input_type)?;
+            let output = parse_type(output_type)?;
+            validate_wit_binding_types(&input, &output, route.path.as_str())?;
         }
     }
     Ok(())
@@ -73,11 +70,94 @@ fn parse_type(type_str: &str) -> Result<AnalysedType, String> {
 }
 
 fn validate_wit_binding_types(
-    _input_type: &AnalysedType,
-    _output_type: &AnalysedType
+    input_type: &AnalysedType,
+    output_type: &AnalysedType,
+    path: &str,
 ) -> Result<(), String> {
-    // Validation handled by WIT type system
+    // Validate input type constraints
+    validate_type_constraints(input_type, TypeConstraint::Input)
+        .map_err(|e| format!("Invalid input type for path {}: {}", path, e))?;
+
+    // Validate output type constraints
+    validate_type_constraints(output_type, TypeConstraint::Output)
+        .map_err(|e| format!("Invalid output type for path {}: {}", path, e))?;
+
+    // Validate type compatibility
+    if !are_types_compatible(input_type, output_type) {
+        return Err(format!(
+            "Incompatible types for path {}: input {:?} cannot be used with output {:?}",
+            path, input_type, output_type
+        ));
+    }
+
     Ok(())
+}
+
+fn validate_type_constraints(typ: &AnalysedType, constraint: TypeConstraint) -> Result<(), String> {
+    match (typ, constraint) {
+        // Validate primitive types
+        (AnalysedType::Str(_), _) |
+        (AnalysedType::Int32(_), _) |
+        (AnalysedType::Int64(_), _) |
+        (AnalysedType::F32(_), _) |
+        (AnalysedType::F64(_), _) |
+        (AnalysedType::Bool(_), _) |
+        (AnalysedType::Void(_), _) => Ok(()),
+
+        // Validate lists
+        (AnalysedType::List(l), c) => validate_type_constraints(&l.inner, c),
+
+        // Validate records
+        (AnalysedType::Record(r), c) => {
+            for field in &r.fields {
+                validate_type_constraints(&field.typ, c)?;
+            }
+            Ok(())
+        },
+
+        // Validate options
+        (AnalysedType::Option(o), c) => validate_type_constraints(&o.inner, c),
+
+        // Validate results
+        (AnalysedType::Result(r), c) => {
+            if let (Some(ok), Some(err)) = (&r.ok, &r.err) {
+                validate_type_constraints(ok, c)?;
+                validate_type_constraints(err, c)
+            } else {
+                Err("Result type must have both ok and err types".to_string())
+            }
+        },
+
+        _ => Err(format!("Unsupported type {:?} for {:?}", typ, constraint))
+    }
+}
+
+fn are_types_compatible(input: &AnalysedType, output: &AnalysedType) -> bool {
+    match (input, output) {
+        // Check primitive type compatibility
+        (AnalysedType::Str(_), AnalysedType::Str(_)) |
+        (AnalysedType::Int32(_), AnalysedType::Int32(_)) |
+        (AnalysedType::Int64(_), AnalysedType::Int64(_)) |
+        (AnalysedType::F32(_), AnalysedType::F32(_)) |
+        (AnalysedType::F64(_), AnalysedType::F64(_)) |
+        (AnalysedType::Bool(_), AnalysedType::Bool(_)) |
+        (AnalysedType::Void(_), AnalysedType::Void(_)) => true,
+
+        // Check list compatibility
+        (AnalysedType::List(l1), AnalysedType::List(l2)) => 
+            are_types_compatible(&l1.inner, &l2.inner),
+
+        // Check record compatibility
+        (AnalysedType::Record(r1), AnalysedType::Record(r2)) => {
+            r1.fields.len() == r2.fields.len() &&
+            r1.fields.iter().zip(&r2.fields).all(|(f1, f2)| {
+                f1.name == f2.name && are_types_compatible(&f1.typ, &f2.typ)
+            })
+        },
+
+        // Other combinations are incompatible
+        _ => false
+    }
 }
 
 #[cfg(test)]

@@ -2,7 +2,7 @@ use super::types::*;
 use crate::api::definition::types::{ApiDefinition, Route, HttpMethod, BindingType};
 use crate::api::definition::patterns::{AllPathPatterns, PathPattern};
 use std::collections::HashMap;
-use heck::ToSnakeCase; 
+use heck::ToSnakeCase;
 
 pub struct OpenAPIConverter;
 
@@ -210,55 +210,135 @@ impl OpenAPIConverter {
     }
 
     fn extract_path_parameters(path: &str) -> Option<Vec<Parameter>> {
-        // Use the official parser to parse the path pattern
         let path_pattern = match AllPathPatterns::parse(path) {
             Ok(pattern) => pattern,
-            Err(_) => return None
+            Err(e) => {
+                tracing::warn!("Failed to parse path pattern: {}", e);
+                return None;
+            }
         };
 
-        // Extract parameters from path patterns
         let params: Vec<Parameter> = path_pattern.path_patterns
             .iter()
             .filter_map(|pattern| match pattern {
-                PathPattern::Var(info) => Some(Parameter {
-                    name: info.key_name.clone(),
-                    r#in: ParameterLocation::Path,
-                    description: None, 
-                    required: Some(true),
-                    schema: if info.key_name.ends_with("_id") {
-                        Schema::String {
-                            format: Some("uuid".to_string()),
-                            enum_values: None
-                        }
-                    } else {
-                        Schema::String {
-                            format: None,
-                            enum_values: None
-                        }
-                    },
-                    style: Some("simple".to_string()),
-                    explode: Some(true),
-                }),
-                PathPattern::CatchAllVar(info) => Some(Parameter {
-                    name: info.key_name.clone(), 
-                    r#in: ParameterLocation::Path,
-                    description: Some("Matches one or more path segments".to_string()),
-                    required: Some(true),
-                    schema: Schema::String {
-                        format: None,
-                        enum_values: None
-                    },
-                    style: Some("simple".to_string()),
-                    explode: Some(true),
-                }),
+                PathPattern::Var(info) => {
+                    if !Self::validate_path_parameter(&info.key_name) {
+                        tracing::warn!("Invalid path parameter name: {}", info.key_name);
+                        return None;
+                    }
+
+                    let (schema, description) = Self::infer_parameter_type(&info.key_name);
+                    Some(Parameter {
+                        name: info.key_name.clone(),
+                        r#in: ParameterLocation::Path,
+                        required: Some(true),
+                        schema,
+                        style: Some("simple".to_string()),
+                        explode: Some(false),
+                        description: Some(description)
+                    })
+                },
+                PathPattern::CatchAllVar(info) => {
+                    if !Self::validate_catch_all_parameter(&info.key_name) {
+                        tracing::warn!("Invalid catch-all parameter name: {}", info.key_name);
+                        return None;
+                    }
+
+                    Some(Parameter {
+                        name: info.key_name.clone(),
+                        r#in: ParameterLocation::Path,
+                        required: Some(true),
+                        schema: Schema::Array {
+                            items: Box::new(Schema::String {
+                                format: None,
+                                enum_values: None
+                            })
+                        },
+                        style: Some("matrix".to_string()),
+                        explode: Some(true),
+                        description: Some(format!(
+                            "Multi-segment catch-all parameter: matches one or more path segments for {}", 
+                            info.key_name
+                        ))
+                    })
+                },
                 _ => None
             })
             .collect();
 
-        if params.is_empty() {
-            None
-        } else {
-            Some(params)
+        if params.is_empty() { None } else { Some(params) }
+    }
+
+    fn infer_parameter_type(name: &str) -> (Schema, String) {
+        match name {
+            n if n.ends_with("_id") => (
+                Schema::String { 
+                    format: Some("uuid".to_string()),
+                    enum_values: None
+                },
+                format!("Unique identifier for {}", &n[..n.len()-3])
+            ),
+            n if n.ends_with("_num") || n.ends_with("_count") => (
+                Schema::Integer { 
+                    format: Some("int64".to_string()) 
+                },
+                format!("Numeric value for {}", &n[..n.len()-4])
+            ),
+            n if n.ends_with("_bool") => (
+                Schema::Boolean,
+                format!("Boolean flag for {}", &n[..n.len()-5])
+            ),
+            n if n.ends_with("_date") => (
+                Schema::String { 
+                    format: Some("date".to_string()),
+                    enum_values: None
+                },
+                format!("Date value for {}", &n[..n.len()-5])
+            ),
+            _ => (
+                Schema::String {
+                    format: None,
+                    enum_values: None
+                },
+                format!("Path parameter: {}", name)
+            )
+        }
+    }
+
+    fn validate_path_parameter(name: &str) -> bool {
+        !name.is_empty() 
+            && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+            && !name.starts_with('_')
+            && !name.ends_with('_')
+    }
+
+    fn validate_catch_all_parameter(name: &str) -> bool {
+        Self::validate_path_parameter(name) && !name.contains("__")
+    }
+
+    fn validate_path_parameter_types(params: &[Parameter], wit_types: &HashMap<String, String>) -> Result<(), String> {
+        for param in params {
+            if let Some(wit_type) = wit_types.get(&param.name) {
+                let expected_schema = Self::wit_type_to_schema(wit_type);
+                if !Self::schemas_compatible(&param.schema, &expected_schema) {
+                    return Err(format!(
+                        "Path parameter '{}' schema mismatch: expected {:?}, got {:?}",
+                        param.name, expected_schema, param.schema
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn schemas_compatible(schema1: &Schema, schema2: &Schema) -> bool {
+        match (schema1, schema2) {
+            (Schema::String { .. }, Schema::String { .. }) => true,
+            (Schema::Integer { .. }, Schema::Integer { .. }) => true,
+            (Schema::Boolean, Schema::Boolean) => true,
+            (Schema::Array { items: i1 }, Schema::Array { items: i2 }) => 
+                Self::schemas_compatible(i1, i2),
+            _ => false
         }
     }
 
@@ -642,10 +722,26 @@ impl OpenAPIConverter {
 
     fn create_cors_headers(cors_allowed_origins: &str) -> HashMap<String, String> {
         let mut headers = HashMap::new();
-        headers.insert("Access-Control-Allow-Origin".to_string(), cors_allowed_origins.to_string());
-        headers.insert("Access-Control-Allow-Methods".to_string(), "GET, POST, PUT, DELETE, OPTIONS".to_string());
-        headers.insert("Access-Control-Allow-Headers".to_string(), "Content-Type, Authorization, Idempotency-Key".to_string());
-        headers.insert("Access-Control-Max-Age".to_string(), "3600".to_string());
+        headers.insert(
+            "Access-Control-Allow-Origin".to_string(), 
+            cors_allowed_origins.to_string()
+        );
+        headers.insert(
+            "Access-Control-Allow-Methods".to_string(),
+            "GET, POST, PUT, DELETE, OPTIONS, PATCH, HEAD".to_string()
+        );
+        headers.insert(
+            "Access-Control-Allow-Headers".to_string(),
+            "Content-Type, Authorization, Idempotency-Key, X-API-Key, Accept, Origin".to_string()
+        );
+        headers.insert(
+            "Access-Control-Max-Age".to_string(),
+            "7200".to_string()
+        );
+        headers.insert(
+            "Access-Control-Expose-Headers".to_string(),
+            "Content-Length, Content-Type, X-Request-ID".to_string()
+        );
         headers
     }
 
@@ -979,7 +1075,7 @@ impl OpenAPIConverter {
     fn get_response_schema(route: &Route) -> Schema {
         match &route.binding {
             BindingType::Default { output_type, .. } => {
-                if output_type == "binary" {
+                if (output_type == "binary") {
                     Schema::String {
                         format: Some("binary".to_string()),
                         enum_values: None,
@@ -1030,5 +1126,38 @@ impl OpenAPIConverter {
                 BindingType::Proxy => "ProxyResponse".to_string(),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_path_parameter_validation() {
+        assert!(OpenAPIConverter::validate_path_parameter("user_id"));
+        assert!(OpenAPIConverter::validate_path_parameter("count123"));
+        assert!(!OpenAPIConverter::validate_path_parameter("_hidden"));
+        assert!(!OpenAPIConverter::validate_path_parameter("invalid-name"));
+        assert!(!OpenAPIConverter::validate_path_parameter(""));
+    }
+
+    #[test]
+    fn test_catch_all_parameter_validation() {
+        assert!(OpenAPIConverter::validate_catch_all_parameter("path"));
+        assert!(OpenAPIConverter::validate_catch_all_parameter("file_path"));
+        assert!(!OpenAPIConverter::validate_catch_all_parameter("invalid__name"));
+        assert!(!OpenAPIConverter::validate_catch_all_parameter("_path"));
+    }
+
+    #[test]
+    fn test_parameter_type_inference() {
+        let (schema, desc) = OpenAPIConverter::infer_parameter_type("user_id");
+        assert!(matches!(schema, Schema::String { format: Some(f), .. } if f == "uuid"));
+        assert!(desc.contains("identifier"));
+
+        let (schema, desc) = OpenAPIConverter::infer_parameter_type("item_count");
+        assert!(matches!(schema, Schema::Integer { .. }));
+        assert!(desc.contains("Numeric"));
     }
 }

@@ -1,6 +1,7 @@
 mod types;
 mod converter;
 mod error;
+mod validation;
 
 pub use types::*;
 pub use converter::OpenAPIConverter;
@@ -20,7 +21,7 @@ impl OpenAPIConverter {
                 ..Default::default()
             },
             paths: Self::convert_paths(&api.routes),
-            components: Some(Default::default()),
+            components: Some(Self::create_components(&api.routes)),
             ..Default::default()
         }
     }
