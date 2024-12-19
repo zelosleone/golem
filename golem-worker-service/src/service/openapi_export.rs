@@ -1,12 +1,11 @@
 use crate::api::definition::{ApiDefinition, Route, HttpMethod, BindingType};
-use crate::api::openapi::{OpenAPIConverter, OpenAPISpec, validate_openapi, OpenAPIError};
+use crate::api::openapi::{OpenAPIConverter, OpenAPISpec, validate_openapi};
 use golem_service_base::auth::{EmptyAuthCtx, DefaultNamespace};
 use golem_worker_service_base::gateway_api_definition::{ApiDefinitionId, ApiVersion};
 use golem_worker_service_base::gateway_api_definition::http::MethodPattern;
-use golem_worker_service_base::gateway_binding::gateway_binding_compiled::{
-    GatewayBindingCompiled, WorkerBinding, FileServerBinding, SwaggerUIBinding, StaticBinding
-};
-use golem_wasm_ast::analysis::{AnalysedType, TypeInference};
+use golem_worker_service_base::gateway_binding::gateway_binding_compiled::GatewayBindingCompiled;
+use golem_worker_service_base::gateway_binding::worker_binding_compiled::WorkerBindingCompiled;
+use golem_wasm_ast::analysis::model::{AnalysedType, TypeInference};
 use axum::{
     extract::{Path, State},
     Json,
@@ -59,37 +58,41 @@ fn convert_method(method: &MethodPattern) -> HttpMethod {
 fn convert_binding(binding: &GatewayBindingCompiled) -> BindingType {
     match binding {
         GatewayBindingCompiled::Worker(worker) => {
-            // Extract type information from Rib script
-            let (input_type, output_type) = match &worker.rib_script {
-                Some(script) => {
-                    let rib_types = script.infer_types();
-                    (rib_types.input_type, rib_types.output_type)
-                },
-                None => (AnalysedType::Any, AnalysedType::Any),
+            // Extract type information from worker binding
+            let (input_type, output_type) = match worker {
+                WorkerBindingCompiled { 
+                    component_id,
+                    worker_name_compiled,
+                    idempotency_key_compiled,
+                    response_compiled,
+                } => {
+                    // Infer types from worker binding
+                    let input_type = response_compiled.input_type.clone();
+                    let output_type = response_compiled.output_type.clone();
+                    (input_type, output_type)
+                }
             };
 
             BindingType::Default {
+                function_name: worker.worker_name_compiled.clone(),
                 input_type,
                 output_type,
-                options: None,
             }
         },
         GatewayBindingCompiled::FileServer(fs) => {
             BindingType::FileServer {
                 root_dir: fs.root_dir.clone(),
-                options: None,
-            }
-        },
-        GatewayBindingCompiled::SwaggerUI(swagger) => {
-            BindingType::SwaggerUI {
-                spec_path: swagger.spec_path.clone(),
-                options: None,
             }
         },
         GatewayBindingCompiled::Static(static_binding) => {
             BindingType::Static {
                 content_type: static_binding.content_type.clone(),
                 content: static_binding.content.clone(),
+            }
+        },
+        GatewayBindingCompiled::SwaggerUI(swagger) => {
+            BindingType::SwaggerUI {
+                spec_path: swagger.spec_path.clone(),
             }
         },
         _ => {
@@ -146,7 +149,6 @@ pub async fn export_openapi(
             ))
         })?;
 
-    // Convert CompiledHttpApiDefinition to ApiDefinition
     let api_id = api_def.id.0.clone();
     let api_definition = ApiDefinition {
         id: api_id.clone(),
@@ -192,28 +194,26 @@ pub async fn export_openapi(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use golem_wasm_ast::analysis::{TypeStr, TypeBool};
+    use golem_wasm_ast::analysis::model::{TypeStr, TypeBool};
 
     #[test]
     fn test_convert_worker_binding() {
-        let rib_script = r#"
-            fn handle_request(input: string) -> bool {
-                input.length() > 0
-            }
-        "#;
-
-        let worker_binding = WorkerBinding {
-            rib_script: Some(rib_script.to_string()),
-            function_name: "handle_request".to_string(),
-            options: None,
+        let worker_binding = WorkerBindingCompiled {
+            component_id: "test".to_string(),
+            worker_name_compiled: "handle_request".to_string(),
+            idempotency_key_compiled: None,
+            response_compiled: ResponseCompiled {
+                input_type: AnalysedType::Str(TypeStr),
+                output_type: AnalysedType::Bool(TypeBool),
+            },
         };
 
         let binding = convert_binding(&GatewayBindingCompiled::Worker(worker_binding));
         
         match binding {
             BindingType::Default { input_type, output_type, .. } => {
-                assert!(matches!(input_type, AnalysedType::Str(TypeStr)));
-                assert!(matches!(output_type, AnalysedType::Bool(TypeBool)));
+                assert!(matches!(input_type, AnalysedType::Str(_)));
+                assert!(matches!(output_type, AnalysedType::Bool(_)));
             },
             _ => panic!("Expected Default binding type"),
         }
@@ -223,13 +223,12 @@ mod tests {
     fn test_convert_file_server_binding() {
         let fs_binding = FileServerBinding {
             root_dir: "/test".to_string(),
-            options: None,
         };
 
         let binding = convert_binding(&GatewayBindingCompiled::FileServer(fs_binding));
         
         match binding {
-            BindingType::FileServer { root_dir, .. } => {
+            BindingType::FileServer { root_dir } => {
                 assert_eq!(root_dir, "/test");
             },
             _ => panic!("Expected FileServer binding type"),
@@ -237,19 +236,20 @@ mod tests {
     }
 
     #[test]
-    fn test_convert_swagger_ui_binding() {
-        let swagger_binding = SwaggerUIBinding {
-            spec_path: "/api/spec".to_string(),
-            options: None,
+    fn test_convert_static_binding() {
+        let static_binding = StaticBinding {
+            content_type: "text/plain".to_string(),
+            content: b"test".to_vec(),
         };
 
-        let binding = convert_binding(&GatewayBindingCompiled::SwaggerUI(swagger_binding));
+        let binding = convert_binding(&GatewayBindingCompiled::Static(static_binding));
         
         match binding {
-            BindingType::SwaggerUI { spec_path, .. } => {
-                assert_eq!(spec_path, "/api/spec");
+            BindingType::Static { content_type, content } => {
+                assert_eq!(content_type, "text/plain");
+                assert_eq!(content, b"test");
             },
-            _ => panic!("Expected SwaggerUI binding type"),
+            _ => panic!("Expected Static binding type"),
         }
     }
 }

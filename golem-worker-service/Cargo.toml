@@ -39,6 +39,7 @@ futures-util = { workspace = true }
 http = { workspace = true }
 humantime-serde = { workspace = true }
 hyper = { workspace = true }
+indexmap = "2.1.0"
 lazy_static = { workspace = true }
 nom = { workspace = true }
 openapiv3 = { workspace = true }

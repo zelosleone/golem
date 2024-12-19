@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use golem_wasm_ast::analysis::analysed_type::AnalysedType;
+use golem_wasm_ast::analysis::model::AnalysedType;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpenAPISpec {
@@ -193,25 +193,21 @@ pub struct SecurityRequirement(HashMap<String, Vec<String>>);
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum BindingType {
     Default {
+        function_name: String,
         input_type: AnalysedType,
         output_type: AnalysedType,
-        options: Option<BindingOptions>,
+    },
+    Worker {
+        function_name: String,
+        input_type: AnalysedType,
+        output_type: AnalysedType,
     },
     FileServer {
         root_dir: String,
-        options: Option<FileServerOptions>,
     },
     SwaggerUI {
         spec_path: String,
-        options: Option<SwaggerUIOptions>,
     },
-    Worker {
-        input_type: AnalysedType,
-        output_type: AnalysedType,
-        options: Option<WorkerOptions>,
-    },
-    Http,
-    Proxy,
     Static {
         content_type: String,
         content: Vec<u8>,

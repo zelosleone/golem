@@ -1,4 +1,4 @@
-use golem_worker_service_base::gateway_api_definition::binding as base;
+use golem_worker_service_base::gateway_binding::binding as base;
 use serde::{Deserialize, Serialize};
 
 /// Extended binding types for the worker service

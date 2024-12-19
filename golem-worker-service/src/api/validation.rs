@@ -1,25 +1,34 @@
+use crate::api::definition::types::BindingType;
 use crate::api::ApiDefinition;
-use crate::api::BindingType;
 use golem_wasm_ast::analysis::analysed_type::AnalysedType;
 
 pub fn validate_api_definition(api: &ApiDefinition) -> Result<(), String> {
     for route in &api.routes {
         match &route.binding {
-            BindingType::Default { input_type, output_type, .. } => {
-                validate_wit_binding_types(input_type, output_type)?;
+            BindingType::Default { input_type, output_type, .. } | 
+            BindingType::Worker { input_type, output_type, .. } => {
+                // Validate input type
+                if !is_valid_type(input_type) {
+                    return Err(format!("Invalid input type for route {}: {:?}", route.path, input_type));
+                }
+                // Validate output type
+                if !is_valid_type(output_type) {
+                    return Err(format!("Invalid output type for route {}: {:?}", route.path, output_type));
+                }
+            },
+            BindingType::FileServer { .. } | 
+            BindingType::SwaggerUI { .. } | 
+            BindingType::Static { .. } => {
+                // These bindings don't need type validation
             }
-            _ => {}
         }
     }
     Ok(())
 }
 
-fn validate_wit_binding_types(
-    input_type: &AnalysedType,
-    output_type: &AnalysedType
-) -> Result<(), String> {
-    // Validation handled by WIT type system
-    Ok(())
+fn is_valid_type(typ: &AnalysedType) -> bool {
+    // Add your type validation logic here
+    true // For now, accept all types
 }
 
 #[cfg(test)]

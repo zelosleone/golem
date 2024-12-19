@@ -4,30 +4,36 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum BindingType {
-    Http,
-    Worker,
-    Proxy,
-    #[serde(rename = "Default")]
     Default {
-        input_type: String,
-        output_type: String,
         function_name: String,
+        input_type: AnalysedType,
+        output_type: AnalysedType,
     },
-    #[serde(rename = "FileServer")]
+    Worker {
+        function_name: String,
+        input_type: AnalysedType,
+        output_type: AnalysedType,
+    },
     FileServer {
         root_dir: String,
     },
-    #[serde(rename = "SwaggerUI")]
     SwaggerUI {
         spec_path: String,
+    },
+    Static {
+        content_type: String,
+        content: Vec<u8>,
     },
 }
 
 impl std::fmt::Display for BindingType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            BindingType::Default { input_type, output_type, function_name } => {
-                write!(f, "Default({}, {}, {})", input_type, output_type, function_name)
+            BindingType::Default { function_name, input_type, output_type } => {
+                write!(f, "Default({}, {}, {})", function_name, input_type, output_type)
+            },
+            BindingType::Worker { function_name, input_type, output_type } => {
+                write!(f, "Worker({}, {}, {})", function_name, input_type, output_type)
             },
             BindingType::FileServer { root_dir } => {
                 write!(f, "FileServer({})", root_dir)
@@ -35,7 +41,9 @@ impl std::fmt::Display for BindingType {
             BindingType::SwaggerUI { spec_path } => {
                 write!(f, "SwaggerUI({})", spec_path)
             },
-            _ => write!(f, "{:?}", self),
+            BindingType::Static { content_type, content } => {
+                write!(f, "Static({}, {:?})", content_type, content)
+            },
         }
     }
 }
