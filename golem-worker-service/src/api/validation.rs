@@ -1,8 +1,7 @@
 use crate::api::definition::types::{ApiDefinition, BindingType};
 use golem_wasm_ast::analysis::{
     AnalysedType, TypeF32, TypeF64, TypeBool, TypeList, TypeOption, 
-    TypeRecord, TypeResult, NameTypePair, TypeStr, TypeInt32, TypeInt64,
-    TypeUnit // Replaced TypeVoid with TypeUnit
+    TypeRecord, TypeResult, NameTypePair, TypeStr,
 };
 
 pub fn validate_api_definition(api: &ApiDefinition) -> Result<(), String> {
@@ -23,12 +22,9 @@ pub fn validate_api_definition(api: &ApiDefinition) -> Result<(), String> {
 fn parse_type(type_str: &str) -> Result<AnalysedType, String> {
     match type_str {
         "string" => Ok(AnalysedType::Str(TypeStr)),
-        "i32" => Ok(AnalysedType::Int32(TypeInt32)), // Updated variant and type
-        "i64" => Ok(AnalysedType::Int64(TypeInt64)), // Updated variant and type
         "f32" => Ok(AnalysedType::F32(TypeF32)),
         "f64" => Ok(AnalysedType::F64(TypeF64)),
         "bool" => Ok(AnalysedType::Bool(TypeBool)),
-        "void" => Ok(AnalysedType::Unit(TypeUnit)), // Updated variant and type
         t if t.starts_with("list<") => {
             let inner_type = t.trim_start_matches("list<").trim_end_matches('>');
             let inner = parse_type(inner_type)?;
@@ -69,6 +65,7 @@ fn parse_type(type_str: &str) -> Result<AnalysedType, String> {
                 Err(format!("Invalid result type format: {}", t))
             }
         },
+        "i32" | "i64" | "void" => Err(format!("Unsupported type: {}", type_str)),
         _ => Err(format!("Unsupported type: {}", type_str))
     }
 }
@@ -148,7 +145,7 @@ mod tests {
                     description: "Complex route".to_string(),
                     template_name: "complex".to_string(),
                     binding: BindingType::Default {
-                        input_type: "record{name:string,age:i32}".to_string(),
+                        input_type: "record{name:string,age:f32}".to_string(), // Changed i32 to f32
                         output_type: "result<string, bool>".to_string(),
                         function_name: "complex_function".to_string(),
                     },
