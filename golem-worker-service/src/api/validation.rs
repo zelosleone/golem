@@ -22,13 +22,13 @@ pub fn validate_api_definition(api: &ApiDefinition) -> Result<(), String> {
 
 fn parse_type(type_str: &str) -> Result<AnalysedType, String> {
     match type_str {
-        "string" => Ok(AnalysedType::String(TypePrimitive::String)),
-        "i32" => Ok(AnalysedType::I32(TypePrimitive::I32)),
-        "i64" => Ok(AnalysedType::I64(TypePrimitive::I64)),
+        "string" => Ok(AnalysedType::Primitive(TypePrimitive::STRING)),
+        "i32" => Ok(AnalysedType::Primitive(TypePrimitive::I_32)),
+        "i64" => Ok(AnalysedType::Primitive(TypePrimitive::I_64)),
         "f32" => Ok(AnalysedType::F32(TypeF32)),
         "f64" => Ok(AnalysedType::F64(TypeF64)),
         "bool" => Ok(AnalysedType::Bool(TypeBool)),
-        "void" => Ok(AnalysedType::Void),
+        "void" => Ok(AnalysedType::Unit),
         t if t.starts_with("list<") => {
             let inner_type = t.trim_start_matches("list<").trim_end_matches('>');
             let inner = parse_type(inner_type)?;
@@ -42,7 +42,7 @@ fn parse_type(type_str: &str) -> Result<AnalysedType, String> {
                 if let Some((name, type_str)) = field.split_once(':') {
                     fields.push(NameTypePair {
                         name: name.trim().to_string(),
-                        type_: parse_type(type_str.trim())?
+                        typ: parse_type(type_str.trim())?,
                     });
                 } else {
                     return Err(format!("Invalid record field format: {}", field));
