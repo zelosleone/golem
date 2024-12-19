@@ -46,16 +46,25 @@ impl std::fmt::Display for BindingType {
     }
 }
 
+// Update From implementation for GatewayBindingCompiled
 impl From<&GatewayBindingCompiled> for BindingType {
     fn from(binding: &GatewayBindingCompiled) -> Self {
         match binding {
-            GatewayBindingCompiled::Worker(worker) => BindingType::Worker {
-                input_type: worker.input_type.to_string(),
-                output_type: worker.output_type.to_string(),
-                function_name: worker.function_name.clone(),
+            GatewayBindingCompiled::Worker(worker) => {
+                let input_type = worker.input_type.to_string();
+                let output_type = worker.output_type.to_string();
+                BindingType::Worker {
+                    input_type,
+                    output_type,
+                    function_name: worker.function_name.clone(),
+                }
             },
             GatewayBindingCompiled::FileServer(fs) => BindingType::FileServer {
                 root_dir: fs.root_dir.clone(),
+            },
+            GatewayBindingCompiled::Static(static_binding) => BindingType::Static {
+                content_type: static_binding.content_type.clone(),
+                content: static_binding.content.clone(),
             },
             _ => BindingType::Http,
         }

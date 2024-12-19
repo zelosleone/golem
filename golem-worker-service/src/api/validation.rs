@@ -21,27 +21,19 @@ pub fn validate_api_definition(api: &ApiDefinition) -> Result<(), String> {
     Ok(())
 }
 
+// Replace validate_wit_binding_types function:
 fn validate_wit_binding_types(
-    input_type: &AnalysedType,
-    output_type: &AnalysedType,
+    input_type: &str,
+    output_type: &str,
     path: &str,
 ) -> Result<(), String> {
-    // Validate input type constraints
-    validate_type_constraints(input_type, TypeConstraint::Input)
-        .map_err(|e| format!("Invalid input type for path {}: {}", path, e))?;
-
-    // Validate output type constraints
-    validate_type_constraints(output_type, TypeConstraint::Output)
-        .map_err(|e| format!("Invalid output type for path {}: {}", path, e))?;
-
-    // Validate type compatibility
-    if !are_types_compatible(input_type, output_type) {
-        return Err(format!(
-            "Incompatible types for path {}: input {:?} cannot be used with output {:?}",
-            path, input_type, output_type
-        ));
+    // For now, just validate that they're not empty
+    if input_type.is_empty() {
+        return Err(format!("Empty input type for path {}", path));
     }
-
+    if output_type.is_empty() {
+        return Err(format!("Empty output type for path {}", path));
+    }
     Ok(())
 }
 

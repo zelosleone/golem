@@ -137,16 +137,30 @@ impl OpenAPIConverter {
         }
     }
 
-    fn convert_parameters(route: &Route) -> Vec<ReferenceOr<OpenApiParameter>> {
+    fn convert_parameters(route: &Route) -> Vec<ReferenceOr<openapiv3::Parameter>> {
         let mut params = Vec::new();
         
-        // Convert path parameters
         if let Some(path_params) = Self::extract_path_parameters(&route.path) {
             for param in path_params {
-                params.push(ReferenceOr::Item(param.into()));
+                let schema: Schema = param.schema.clone().into();
+                let param = openapiv3::Parameter::Path {
+                    parameter_data: openapiv3::ParameterData {
+                        name: param.name,
+                        description: param.description,
+                        required: param.required.unwrap_or(true),
+                        deprecated: None,
+                        format: openapiv3::ParameterSchemaOrContent::Schema(Box::new(ReferenceOr::Item(schema))),
+                        example: None,
+                        examples: Default::default(),
+                        explode: param.explode.unwrap_or(false),
+                        extensions: Default::default(),
+                    },
+                    style: param.style.map(|s| s.parse().unwrap_or(openapiv3::PathStyle::Simple))
+                        .unwrap_or(openapiv3::PathStyle::Simple),
+                };
+                params.push(ReferenceOr::Item(param));
             }
         }
-
         params
     }
 

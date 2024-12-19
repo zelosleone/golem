@@ -177,23 +177,51 @@ impl IntoRaw<openapiv3::Parameter> for Parameter {
     }
 }
 
+// Add complete From implementation for OpenAPISchemaType
 impl From<OpenAPISchemaType> for Schema {
     fn from(schema: OpenAPISchemaType) -> Self {
         let schema_kind = match schema {
             OpenAPISchemaType::String { format, enum_values } => {
-                SchemaKind::Type(OpenAPIType::String(openapiv3::StringType {
+                SchemaKind::Type(openapiv3::Type::String(openapiv3::StringType {
                     format: format.map(|f| f.into()),
                     enumeration: enum_values.map(|v| v.into_iter().map(Some).collect()).unwrap_or_default(),
                     ..Default::default()
                 }))
             },
             OpenAPISchemaType::Integer { format } => {
-                SchemaKind::Type(OpenAPIType::Integer(openapiv3::IntegerType {
+                SchemaKind::Type(openapiv3::Type::Integer(openapiv3::IntegerType {
                     format: format.map(|f| f.into()),
                     ..Default::default()
                 }))
             },
-            // ...add other conversions similarly
+            OpenAPISchemaType::Number { format } => {
+                SchemaKind::Type(openapiv3::Type::Number(openapiv3::NumberType {
+                    format: format.map(|f| f.into()),
+                    ..Default::default()
+                }))
+            },
+            OpenAPISchemaType::Boolean => {
+                SchemaKind::Type(openapiv3::Type::Boolean(openapiv3::BooleanType::default()))
+            },
+            OpenAPISchemaType::Array { items } => {
+                SchemaKind::Type(openapiv3::Type::Array(openapiv3::ArrayType {
+                    items: Some(Box::new(ReferenceOr::Item((*items).into()))),
+                    ..Default::default()
+                }))
+            },
+            OpenAPISchemaType::Object { properties, required } => {
+                let properties = properties.into_iter()
+                    .map(|(k, v)| (k, ReferenceOr::Item(v.into())))
+                    .collect();
+                SchemaKind::Type(openapiv3::Type::Object(openapiv3::ObjectType {
+                    properties,
+                    required: required.unwrap_or_default(),
+                    ..Default::default()
+                }))
+            },
+            OpenAPISchemaType::Reference { reference } => {
+                SchemaKind::Reference { reference }
+            }
         };
         Schema {
             schema_kind,
