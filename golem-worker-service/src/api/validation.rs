@@ -13,26 +13,10 @@ enum TypeConstraint {
 pub fn validate_api_definition(api: &ApiDefinition) -> Result<(), String> {
     for route in &api.routes {
         if let BindingType::Default { input_type, output_type, .. } = &route.binding {
-            // Now input_type and output_type are already AnalysedType,
-            // so we can directly validate them.
-            validate_wit_binding_types(input_type, output_type, route.path.as_str())?;
+            if input_type.is_empty() || output_type.is_empty() {
+                return Err(format!("Empty type for path {}", route.path));
+            }
         }
-    }
-    Ok(())
-}
-
-// Replace validate_wit_binding_types function:
-fn validate_wit_binding_types(
-    input_type: &str,
-    output_type: &str,
-    path: &str,
-) -> Result<(), String> {
-    // For now, just validate that they're not empty
-    if input_type.is_empty() {
-        return Err(format!("Empty input type for path {}", path));
-    }
-    if output_type.is_empty() {
-        return Err(format!("Empty output type for path {}", path));
     }
     Ok(())
 }

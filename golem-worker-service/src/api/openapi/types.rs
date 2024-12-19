@@ -232,21 +232,21 @@ impl From<OpenAPISchemaType> for Schema {
 
 impl From<Parameter> for openapiv3::Parameter {
     fn from(param: Parameter) -> Self {
+        let schema: Schema = param.schema.into();
         openapiv3::Parameter::Path {
             parameter_data: openapiv3::ParameterData {
                 name: param.name,
                 description: param.description,
                 required: param.required.unwrap_or(true),
                 deprecated: None,
-                format: openapiv3::ParameterSchemaOrContent::Schema(Box::new(ReferenceOr::Item(
-                    param.schema.into()
-                ))),
+                format: openapiv3::ParameterSchemaOrContent::Schema(Box::new(ReferenceOr::Item(schema))),
                 example: None,
                 examples: Default::default(),
                 explode: param.explode.unwrap_or(false),
                 extensions: Default::default(),
             },
-            style: param.style.map(|s| s.parse().unwrap_or(openapiv3::PathStyle::Simple))
+            style: param.style
+                .and_then(|s| s.parse().ok())
                 .unwrap_or(openapiv3::PathStyle::Simple),
         }
     }

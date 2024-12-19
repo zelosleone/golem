@@ -13,19 +13,20 @@ pub enum BindingType {
         function_name: String,
     },
     Proxy,
-    #[serde(rename = "Default")]
     Default {
         input_type: String,
         output_type: String,
         function_name: String,
     },
-    #[serde(rename = "FileServer")]
     FileServer {
         root_dir: String,
     },
-    #[serde(rename = "SwaggerUI")]
     SwaggerUI {
         spec_path: String,
+    },
+    Static {
+        content_type: String,
+        content: Vec<u8>,
     },
 }
 

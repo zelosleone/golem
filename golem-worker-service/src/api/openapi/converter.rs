@@ -142,23 +142,8 @@ impl OpenAPIConverter {
         
         if let Some(path_params) = Self::extract_path_parameters(&route.path) {
             for param in path_params {
-                let schema: Schema = param.schema.clone().into();
-                let param = openapiv3::Parameter::Path {
-                    parameter_data: openapiv3::ParameterData {
-                        name: param.name,
-                        description: param.description,
-                        required: param.required.unwrap_or(true),
-                        deprecated: None,
-                        format: openapiv3::ParameterSchemaOrContent::Schema(Box::new(ReferenceOr::Item(schema))),
-                        example: None,
-                        examples: Default::default(),
-                        explode: param.explode.unwrap_or(false),
-                        extensions: Default::default(),
-                    },
-                    style: param.style.map(|s| s.parse().unwrap_or(openapiv3::PathStyle::Simple))
-                        .unwrap_or(openapiv3::PathStyle::Simple),
-                };
-                params.push(ReferenceOr::Item(param));
+                let schema: Schema = param.schema.into();
+                params.push(ReferenceOr::Item(param.into()));
             }
         }
         params
@@ -239,29 +224,39 @@ impl OpenAPIConverter {
     }
 
     fn create_request_body(route: &Route) -> Option<OpenApiRequestBody> {
-        if let BindingType::Default { input_type, .. } = &route.binding {
-            let schema = analysed_type_to_schema(&input_type);
+        match &route.binding {
+            BindingType::Default { input_type, .. } => {
+                let schema = Schema {
+                    schema_data: Default::default(),
+                    schema_kind: SchemaKind::Type(openapiv3::Type::String(StringType {
+                        format: None,
+                        pattern: None,
+                        enumeration: vec![],
+                        min_length: None,
+                        max_length: None,
+                    })),
+                };
 
-            let mut content = IndexMap::new();
-            content.insert(
-                "application/json; charset=utf-8".to_string(),
-                MediaType {
-                    schema: Some(schema),
-                    example: None,
-                    examples: Default::default(),
-                    encoding: Default::default(),
-                    extensions: Default::default(),
-                }
-            );
+                let mut content = IndexMap::new();
+                content.insert(
+                    "application/json".to_string(),
+                    MediaType {
+                        schema: Some(ReferenceOr::Item(schema)),
+                        example: None,
+                        examples: Default::default(),
+                        encoding: Default::default(),
+                        extensions: Default::default(),
+                    }
+                );
 
-            Some(OpenApiRequestBody {
-                description: None,
-                content,
-                required: true,
-                extensions: Default::default()
-            })
-        } else {
-            None
+                Some(OpenApiRequestBody {
+                    description: None,
+                    content,
+                    required: true,
+                    extensions: Default::default()
+                })
+            },
+            _ => None
         }
     }
 
