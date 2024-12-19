@@ -18,19 +18,21 @@ use bincode::{BorrowDecode, Decode, Encode};
 use bincode::de::{BorrowDecoder, Decoder};
 use bincode::enc::Encoder;
 use bincode::error::{DecodeError, EncodeError};
-use golem_wasm_ast::analysis::AnalysedType;
-use golem_wasm_ast::analysis::analysed_type::{field, list, r#enum, record, s64, str as wasm_str, tuple, u32 as wasm_u32, u64 as wasm_u64};
-use golem_wasm_rpc::{IntoValue, Value};
+use golem_wasm_ast::analysis::analysed_type::*;
+use golem_wasm_rpc::IntoValue;
 use http::Uri;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde::de::{self, Unexpected, Visitor};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::fmt::{Display, Formatter};
+use std::fmt::{self, Display, Formatter};
+use std::hash::Hash;
 use std::str::{self, FromStr};
 use std::time::{Duration, SystemTime};
 use typed_path::Utf8UnixPathBuf;
-use uuid::{uuid, Uuid};
+use url::Url;
+use uuid::Uuid;
+use golem_wasm_ast::analysis::analysed_type as ast;
 
 pub mod api_types;
 pub mod component;
@@ -1557,20 +1559,19 @@ impl Display for IdempotencyKey {
     }
 }
 
-impl IntoValue for Uri {
-    fn into_value(self) -> golem_wasm_rpc::Value {
-        golem_wasm_rpc::Value::String(self.to_string())
-    }
+#[derive(Clone, Debug, PartialEq)]
+pub struct UriWrapper(pub Uri);
 
-    fn get_type() -> AnalysedType {
-        ast::wasm_str()
+impl IntoValue for UriWrapper {
+    fn into_value(self) -> golem_wasm_rpc::Value {
+        golem_wasm_rpc::Value::String(self.0.to_string())
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Encode, Decode)]
 pub struct ResourceKey<T>
 where
-    T: Clone + std::fmt::Debug + PartialEq + Eq + Hash + Serialize + for<'de> Deserialize<'de>,
+    T: Clone + std::fmt::Debug + PartialEq + Eq + Hash + Serialize + Deserialize<'static>,
 {
     pub component_id: ComponentId,
     pub key: T,
@@ -1578,7 +1579,7 @@ where
 
 impl<T> ResourceKey<T>
 where
-    T: Clone + std::fmt::Debug + PartialEq + Eq + Hash + Serialize + for<'de> Deserialize<'de>,
+    T: Clone + std::fmt::Debug + PartialEq + Eq + Hash + Serialize + Deserialize<'static>,
 {
     pub fn new(component_id: ComponentId, key: T) -> Self {
         Self { component_id, key }
@@ -1587,7 +1588,7 @@ where
 
 impl<T> Encode for ResourceKey<T>
 where
-    T: Clone + std::fmt::Debug + PartialEq + Eq + Hash + Serialize + for<'de> Deserialize<'de> + Encode,
+    T: Clone + std::fmt::Debug + PartialEq + Eq + Hash + Serialize + Deserialize<'static> + Encode,
 {
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         self.component_id.encode(encoder)?;
@@ -1597,7 +1598,7 @@ where
 
 impl<T> Decode for ResourceKey<T>
 where
-    T: Clone + std::fmt::Debug + PartialEq + Eq + Hash + Serialize + for<'de> Deserialize<'de> + Decode,
+    T: Clone + std::fmt::Debug + PartialEq + Eq + Hash + Serialize + Deserialize<'static> + Decode,
 {
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         let component_id = ComponentId::decode(decoder)?;
@@ -1608,7 +1609,7 @@ where
 
 impl<T> Display for ResourceKey<T>
 where
-    T: Clone + std::fmt::Debug + PartialEq + Eq + Hash + Serialize + for<'de> Deserialize<'de> + Display,
+    T: Clone + std::fmt::Debug + PartialEq + Eq + Hash + Serialize + Deserialize<'static> + Display,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}:{}", self.component_id, self.key)
@@ -1621,15 +1622,15 @@ where
 #[serde(rename_all = "camelCase")]
 pub struct AnalysedTypeWrapper<T> 
 where 
-    T: Clone + std::fmt::Debug + PartialEq + Serialize + for<'de> Deserialize<'de>
+    T: Clone + std::fmt::Debug + PartialEq + Serialize + Deserialize<'static>,
 {
-    #[serde(bound(deserialize = "T: Deserialize<'de>"))]
+    #[serde(bound(deserialize = "T: Deserialize<'static>"))]
     pub inner: T,
 }
 
 impl<T> Encode for AnalysedTypeWrapper<T>
 where
-    T: Clone + std::fmt::Debug + PartialEq + Serialize + for<'de> Deserialize<'de> + Encode,
+    T: Clone + std::fmt::Debug + PartialEq + Serialize + Deserialize<'static> + Encode,
 {
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         self.inner.encode(encoder)
@@ -1638,7 +1639,7 @@ where
 
 impl<T> Decode for AnalysedTypeWrapper<T>
 where
-    T: Clone + std::fmt::Debug + PartialEq + Serialize + for<'de> Deserialize<'de> + Decode,
+    T: Clone + std::fmt::Debug + PartialEq + Serialize + Deserialize<'static> + Decode,
 {
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         let inner = T::decode(decoder)?;

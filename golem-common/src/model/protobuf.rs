@@ -13,29 +13,24 @@
 // limitations under the License.
 
 use crate::model::{
-    AccountId as ModelAccountId, ComponentFilePath, ComponentFilePathWithPermissionsList, Timestamp,
-    ComponentId, ComponentName, ComponentVersion, ComponentVersionId, InvocationId, Pod,
-    PromiseId, RoutingTable, RoutingTableEntry, ShardId, StringFilterComparator,
-    TemplateId, TemplateVersion, TemplateVersionId, WorkerId, ComponentType,
-    FilterComparator, LogLevel, ComponentFilePermissions, InitialComponentFile,
+    AccountId as ModelAccountId, ComponentFilePath, Timestamp,
+    WorkerId, ComponentType, FilterComparator, LogLevel, 
+    ComponentFilePermissions, InitialComponentFile,
     ComponentFileSystemNode, ComponentFileSystemNodeDetails, GatewayBindingType,
     WorkerStatus, OplogIndex, ApiIdempotencyKey, NumberOfShards, TargetWorkerId,
     InitialComponentFileKey
 };
 use golem_api_grpc::proto::golem::worker::{
-    ComponentFilter, ComponentNameFilter, ComponentVersionFilter, ComponentVersionIdFilter,
-    Cursor, WorkerCreatedAtFilter, WorkerEnvFilter, WorkerFilter as GrpcWorkerFilter, WorkerNameFilter,
-    WorkerStatusFilter, WorkerTemplateFilter, WorkerTemplateVersionFilter, WorkerVersionFilter,
-    Level, FileSystemNode, IdempotencyKey, TargetWorkerId as GrpcTargetWorkerId
+    WorkerFilter as GrpcWorkerFilter, FileSystemNode
 };
 use golem_api_grpc::proto::golem::common::{
-    AccountId, FilterComparator as GrpcFilterComparator, StringFilterComparator as GrpcStringFilterComparator
+    FilterComparator as GrpcFilterComparator, 
+    StringFilterComparator as GrpcStringFilterComparator
 };
 use golem_api_grpc::proto::golem::component::{
-    ComponentType as GrpcComponentType, ComponentFilePermissions as GrpcComponentFilePermissions,
+    ComponentFilePermissions as GrpcComponentFilePermissions,
     InitialComponentFile as GrpcInitialComponentFile
 };
-use golem_api_grpc::proto::golem::apidefinition::GatewayBindingType as GrpcGatewayBindingType;
 use golem_api_grpc::proto::golem::shardmanager::{
     Pod as GrpcPod, RoutingTable as GrpcRoutingTable, RoutingTableEntry as GrpcRoutingTableEntry
 };
@@ -85,20 +80,22 @@ impl TryFrom<golem_api_grpc::proto::golem::worker::WorkerId> for WorkerId {
     }
 }
 
-impl TryFrom<golem::worker::TargetWorkerId> for TargetWorkerId {
+impl TryFrom<golem_api_grpc::proto::golem::worker::TargetWorkerId> for TargetWorkerId {
     type Error = String;
 
-    fn try_from(value: golem::worker::TargetWorkerId) -> Result<Self, Self::Error> {
+    fn try_from(value: golem_api_grpc::proto::golem::worker::TargetWorkerId) -> Result<Self, Self::Error> {
         Ok(Self {
-            value: value.id.ok_or_else(|| "Missing worker id".to_string())?,
+            worker_id: value.worker_id,
+            oplog_idx: value.oplog_idx,
         })
     }
 }
 
-impl From<TargetWorkerId> for golem::worker::TargetWorkerId {
+impl From<TargetWorkerId> for golem_api_grpc::proto::golem::worker::TargetWorkerId {
     fn from(value: TargetWorkerId) -> Self {
         Self {
-            id: Some(value.value),
+            worker_id: value.worker_id,
+            oplog_idx: value.oplog_idx,
         }
     }
 }
