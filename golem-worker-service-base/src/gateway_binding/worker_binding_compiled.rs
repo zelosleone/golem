@@ -17,9 +17,14 @@ use crate::gateway_rib_compiler::{DefaultWorkerServiceRibCompiler, WorkerService
 use golem_service_base::model::VersionedComponentId;
 use golem_wasm_ast::analysis::AnalysedExport;
 use rib::{Expr, RibByteCode, RibInputTypeInfo, RibOutputTypeInfo, WorkerFunctionsInRib};
+use crate::id_types::{VersionedComponentId, WorkerNameCompiled};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct WorkerBindingCompiled {
+    pub id: VersionedComponentId,
+    pub worker_type: String,
+    pub worker_name: Option<WorkerNameCompiled>,
+    pub response_mapping: String,
     pub component_id: VersionedComponentId,
     pub worker_name_compiled: Option<WorkerNameCompiled>,
     pub idempotency_key_compiled: Option<IdempotencyKeyCompiled>,
@@ -56,7 +61,23 @@ impl WorkerBindingCompiled {
             worker_name_compiled,
             idempotency_key_compiled,
             response_compiled,
+            id: gateway_worker_binding.component_id.clone(),
+            worker_type: String::new(),
+            worker_name: None,
+            response_mapping: String::new(),
         })
+    }
+
+    pub fn worker_type(&self) -> &str {
+        &self.worker_type
+    }
+
+    pub fn response_mapping(&self) -> &str {
+        &self.response_mapping
+    }
+
+    pub fn id(&self) -> &VersionedComponentId {
+        &self.id
     }
 }
 

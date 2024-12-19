@@ -1,21 +1,40 @@
 use std::collections::HashSet;
-use crate::api::definition::types::{ApiDefinition, BindingType};
+use crate::api::definition::types::{ApiDefinition, BindingType, Route, HttpMethod};
 use crate::api::errors::{ValidationError, ValidationResult};
-use golem_wasm_ast::analysis::AnalysedType;
+use golem_wasm_ast::analysis::{AnalysedType, TypeStr, TypeRecord};
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum TypeConstraint {
+    Serializable,
+    Deserializable,
+}
 
 pub fn validate_api_definition(api: &ApiDefinition) -> ValidationResult<()> {
     let mut errors = Vec::new();
 
-    // Validate routes uniqueness
     if let Err(err) = validate_route_uniqueness(&api.routes) {
-        errors.push(err.to_string());
+        errors.push(err);
     }
 
-    // Validate route types
     for route in &api.routes {
         if let BindingType::Default { input_type, output_type, .. } = &route.binding {
+            // Validate input type is deserializable
+            if let Err(err) = validate_type_constraints(input_type, TypeConstraint::Deserializable) {
+                errors.push(ValidationError::Type(
+                    format!("Route {} input: {}", route.path, err)
+                ));
+            }
+            // Validate output type is serializable
+            if let Err(err) = validate_type_constraints(output_type, TypeConstraint::Serializable) {
+                errors.push(ValidationError::Type(
+                    format!("Route {} output: {}", route.path, err)
+                ));
+            }
+            // Validate type compatibility
             if let Err(err) = validate_type_compatibility(input_type, output_type) {
-                errors.push(format!("Route {}: {}", route.path, err));
+                errors.push(ValidationError::Type(
+                    format!("Route {}: {}", route.path, err)
+                ));
             }
         }
     }
@@ -29,6 +48,7 @@ pub fn validate_api_definition(api: &ApiDefinition) -> ValidationResult<()> {
 
 fn validate_type_constraints(typ: &AnalysedType, constraint: TypeConstraint) -> Result<(), String> {
     match (typ, constraint) {
+        // Basic types are always valid
         (AnalysedType::Str(_), _) |
         (AnalysedType::S32(_), _) |
         (AnalysedType::S64(_), _) |
@@ -36,10 +56,9 @@ fn validate_type_constraints(typ: &AnalysedType, constraint: TypeConstraint) -> 
         (AnalysedType::F64(_), _) |
         (AnalysedType::Bool(_), _) => Ok(()),
 
-        // Validate lists
+        // Validate container types recursively
         (AnalysedType::List(l), c) => validate_type_constraints(&l.inner, c),
-
-        // Validate records
+        
         (AnalysedType::Record(r), c) => {
             for field in &r.fields {
                 validate_type_constraints(&field.typ, c)?;
@@ -47,10 +66,8 @@ fn validate_type_constraints(typ: &AnalysedType, constraint: TypeConstraint) -> 
             Ok(())
         },
 
-        // Validate options
         (AnalysedType::Option(o), c) => validate_type_constraints(&o.inner, c),
 
-        // Validate results
         (AnalysedType::Result(r), c) => {
             if let (Some(ok), Some(err)) = (&r.ok, &r.err) {
                 validate_type_constraints(ok, c)?;
@@ -60,7 +77,7 @@ fn validate_type_constraints(typ: &AnalysedType, constraint: TypeConstraint) -> 
             }
         },
 
-        _ => Err(format!("Unsupported type {:?} for {:?}", typ, constraint))
+        _ => Err(format!("Unsupported type {:?} for constraint {:?}", typ, constraint))
     }
 }
 
@@ -206,5 +223,16 @@ mod tests {
             validate_route_uniqueness(&routes),
             Err(ValidationError::Route(_))
         ));
+    }
+
+    #[test]
+    fn test_type_constraints() {
+        let str_type = AnalysedType::Str(TypeStr);
+        assert!(validate_type_constraints(&str_type, TypeConstraint::Serializable).is_ok());
+        
+        let record_type = AnalysedType::Record(TypeRecord {
+            fields: vec![]
+        });
+        assert!(validate_type_constraints(&record_type, TypeConstraint::Deserializable).is_ok());
     }
 }

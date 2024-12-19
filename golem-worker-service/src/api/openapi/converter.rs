@@ -20,85 +20,36 @@ use tracing::warn;
 pub struct OpenAPIConverter;
 
 impl OpenAPIConverter {
-    pub fn convert_to_spec(api: &ApiDefinition) -> OpenAPISpec {
+    pub fn convert(api: &ApiDefinition) -> OpenAPISpec {
+        Self::convert_to_spec(api)
+    }
+
+    fn convert_to_spec(api: &ApiDefinition) -> OpenAPISpec {
         OpenAPISpec {
             openapi: "3.0.0".to_string(),
             info: Info {
-                title: "Golem API".to_string(),
-                version: "1.0".to_string(),
-                description: None,
-                terms_of_service: None,
-                contact: None,
-                license: None,
-                extensions: Default::default(),
+                title: api.name.clone(),
+                version: api.version.clone(),
+                description: Some(api.description.clone()),
+                ..Default::default()
             },
             paths: Self::convert_paths(&api.routes),
             components: Some(Self::create_components(&api.routes)),
-            security: None,
-            tags: vec![],
-            extensions: Default::default(),
-            servers: vec![],
-            external_docs: None,
+            ..Default::default()
         }
     }
 
-    pub fn convert_paths(routes: &[Route]) -> Paths {
-        let mut paths = Paths {
-            paths: Default::default(),
-            extensions: Default::default(),
-        };
-
+    fn convert_paths(routes: &[Route]) -> Paths {
+        let mut paths = Paths::default();
+        
         for route in routes {
-            let operation = Self::generate_operation(route);
-
-            // Create an OPTIONS operation for CORS
-            let options_operation = Operation {
-                tags: vec![route.template_name.clone()],
-                summary: None,
-                description: None,
-                external_docs: None,
-                operation_id: None,
-                parameters: vec![],
-                request_body: None,
-                responses: Responses {
-                    default: None,
-                    responses: {
-                        let mut map = IndexMap::new();
-                        // Insert a 200 response for OPTIONS
-                        map.insert(StatusCode::Code(200), ReferenceOr::Item(Response {
-                            description: String::new(),
-                            content: IndexMap::new(),
-                            headers: Self::create_cors_headers("*"),
-                            links: IndexMap::new(),
-                            extensions: Default::default(),
-                        }));
-                        map
-                    },
-                    extensions: Default::default(),
-                },
-                callbacks: Default::default(),
-                deprecated: false,
-                security: None,
-                servers: vec![],
-                extensions: Default::default(),
-            };
-
             let mut path_item = PathItem {
-                summary: None,
-                description: None,
-                get: None,
-                put: None,
-                post: None,
-                delete: None,
-                options: Some(options_operation),
-                head: None,
-                patch: None,
-                trace: None,
-                servers: vec![],
-                parameters: vec![],
-                extensions: Default::default(),
+                summary: Some(route.description.clone()),
+                ..Default::default()
             };
 
+            // Create the main operation
+            let operation = Self::generate_operation(route);
             match route.method {
                 HttpMethod::Get => path_item.get = Some(operation),
                 HttpMethod::Post => path_item.post = Some(operation),
@@ -111,7 +62,7 @@ impl OpenAPIConverter {
 
             paths.paths.insert(route.path.clone(), ReferenceOr::Item(path_item));
         }
-
+        
         paths
     }
 
@@ -165,58 +116,28 @@ impl OpenAPIConverter {
     }
 
     fn extract_path_parameters(path: &str) -> Option<Vec<Parameter>> {
-        let path_pattern = match AllPathPatterns::parse(path) {
-            Ok(pattern) => pattern,
-            Err(e) => {
-                warn!("Failed to parse path pattern: {}", e);
-                return None;
-            }
-        };
-
-        let params: Vec<Parameter> = path_pattern.path_patterns
-            .iter()
-            .filter_map(|pattern| match pattern {
-                PathPattern::Var(info) => {
-                    if !Self::validate_path_parameter(&info.key_name) {
-                        warn!("Invalid path parameter name: {}", info.key_name);
-                        return None;
-                    }
-
-                    let schema = OpenAPISchemaType::String { format: None, enum_values: None };
-                    let description = format!("Path parameter: {}", info.key_name);
-
+        let param_regex = regex::Regex::new(r"\{([^}]+)\}").unwrap();
+        let params: Vec<Parameter> = param_regex.captures_iter(path)
+            .filter_map(|cap| cap.get(1))
+            .filter_map(|m| {
+                let name = m.as_str().to_string();
+                if Self::validate_path_parameter(&name) {
                     Some(Parameter {
-                        name: info.key_name.clone(),
+                        name: name.clone(),
                         r#in: ParameterLocation::Path,
                         required: Some(true),
-                        schema,
+                        schema: OpenAPISchemaType::String { 
+                            format: None, 
+                            enum_values: None 
+                        },
                         style: Some("simple".to_string()),
                         explode: Some(false),
-                        description: Some(description),
+                        description: Some(format!("Path parameter: {}", name)),
                     })
-                },
-                PathPattern::CatchAllVar(info) => {
-                    if !Self::validate_catch_all_parameter(&info.key_name) {
-                        warn!("Invalid catch-all parameter name: {}", info.key_name);
-                        return None;
-                    }
-
-                    Some(Parameter {
-                        name: info.key_name.clone(),
-                        r#in: ParameterLocation::Path,
-                        required: Some(true),
-                        schema: OpenAPISchemaType::Array {
-                            items: Box::new(OpenAPISchemaType::String {
-                                format: None,
-                                enum_values: None
-                            })
-                        },
-                        style: Some("matrix".to_string()),
-                        explode: Some(true),
-                        description: Some(format!("Multi-segment catch-all parameter for {}", info.key_name)),
-                    })
-                },
-                _ => None
+                } else {
+                    warn!("Invalid path parameter name: {}", name);
+                    None
+                }
             })
             .collect();
 
@@ -404,10 +325,28 @@ impl OpenAPIConverter {
             _ => Err(format!("Unsupported type: {}", s))
         }
     }
+
+    fn create_options_operation(route: &Route) -> Operation {
+        Operation {
+            tags: vec![route.template_name.clone()],
+            responses: Responses {
+                responses: {
+                    let mut map = IndexMap::new();
+                    map.insert(StatusCode::Code(200), ReferenceOr::Item(Response {
+                        description: "CORS support".to_string(),
+                        headers: Self::create_cors_headers("*"),
+                        ..Default::default()
+                    }));
+                    map
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
 }
 
 fn analysed_type_to_schema(typ: &AnalysedType) -> ReferenceOr<Schema> {
-    // Construct schema based on analysed types
     let schema = match typ {
         AnalysedType::Bool(_) => Schema {
             schema_data: Default::default(),
@@ -419,29 +358,18 @@ fn analysed_type_to_schema(typ: &AnalysedType) -> ReferenceOr<Schema> {
             schema_data: Default::default(),
             schema_kind: openapiv3::SchemaKind::Type(openapiv3::Type::Integer(IntegerType {
                 format: None,
-                multiple_of: None,
-                minimum: None,
-                maximum: None,
-                exclusive_minimum: false,
-                exclusive_maximum: false,
-                enumeration: vec![]
+                enumeration: vec![],
+                ..Default::default()
             }))
         },
-        // If F32, F64 or other types are not used, remove them. Otherwise define them similarly.
         AnalysedType::Str(_) => Schema {
             schema_data: Default::default(),
             schema_kind: openapiv3::SchemaKind::Type(openapiv3::Type::String(StringType {
                 format: None,
-                pattern: None,
                 enumeration: vec![],
-                min_length: None,
-                max_length: None,
+                ..Default::default()
             }))
         },
-        // For unsupported or additional complex types (List, Tuple, Record, Enum), either define them if needed.
-        // Example (if you had them):
-        // AnalysedType::List(l) => ...
-        // Remove or implement as needed.
         _ => Schema {
             schema_data: Default::default(),
             schema_kind: openapiv3::SchemaKind::Any(Default::default())

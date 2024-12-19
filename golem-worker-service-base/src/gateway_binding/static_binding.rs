@@ -14,6 +14,7 @@
 
 use crate::gateway_middleware::{HttpAuthenticationMiddleware, HttpCors};
 use crate::gateway_security::SecuritySchemeWithProviderMetadata;
+use serde::{Serialize, Deserialize};
 
 // Static bindings must NOT contain Rib, in either pre-compiled or raw form,
 // as it may introduce unnecessary latency
@@ -25,6 +26,29 @@ use crate::gateway_security::SecuritySchemeWithProviderMetadata;
 pub enum StaticBinding {
     HttpCorsPreflight(Box<HttpCors>),
     HttpAuthCallBack(Box<HttpAuthenticationMiddleware>),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StaticBindingContent {
+    content_type: String,
+    content: Vec<u8>,
+}
+
+impl StaticBindingContent {
+    pub fn new(content_type: String, content: Vec<u8>) -> Self {
+        Self {
+            content_type,
+            content,
+        }
+    }
+
+    pub fn get_content_type(&self) -> &str {
+        &self.content_type
+    }
+
+    pub fn get_content(&self) -> &[u8] {
+        &self.content
+    }
 }
 
 impl StaticBinding {

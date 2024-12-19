@@ -7,16 +7,14 @@ pub use error::{OpenAPIError, validate_openapi};
 pub use types::OpenAPISpec;
 pub use converter::OpenAPIConverter;
 
-// Re-export openapiv3::Schema for external use 
-pub use openapiv3::Schema as OpenAPISchema;
-
+// Re-export openapiv3 types for external use
 pub use openapiv3::{
     Schema, SchemaKind, Type as OpenAPIType,
     VariantOrUnknownOrEmpty, StringFormat, Parameter,
     PathStyle, ParameterData,
+    OpenAPI,
 };
 
-use openapiv3::OpenAPI;
 use crate::api::definition::types::ApiDefinition;
 
 impl OpenAPIConverter {

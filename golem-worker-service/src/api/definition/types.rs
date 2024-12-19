@@ -1,8 +1,6 @@
 use serde::{Deserialize, Serialize};
-use golem_worker_service_base::gateway_api_definition::http::{CompiledHttpApiDefinition, MethodPattern};
+use golem_worker_service_base::gateway_api_definition::http::{CompiledHttpApiDefinition, MethodPattern, CompiledRoute};
 use golem_worker_service_base::gateway_binding::gateway_binding_compiled::GatewayBindingCompiled;
-use golem_worker_service_base::gateway_binding::{StaticBinding, WorkerBinding};
-use golem_worker_service_base::id_types::{VersionedComponentId, WorkerNameCompiled};
 use std::str::FromStr;
 
 /// Base binding types for the API Gateway
@@ -11,9 +9,9 @@ use std::str::FromStr;
 pub enum BindingType {
     Http,
     Worker {
-        input_type: String,
-        output_type: String,
-        function_name: String,
+        worker_type: String,
+        response_type: String,
+        component_id: String,
     },
     Proxy,
     Default {
@@ -50,26 +48,25 @@ impl std::fmt::Display for BindingType {
     }
 }
 
-// Update From implementation for GatewayBindingCompiled
 impl From<&GatewayBindingCompiled> for BindingType {
     fn from(binding: &GatewayBindingCompiled) -> Self {
         match binding {
             GatewayBindingCompiled::Worker(worker) => BindingType::Worker {
-                input_type: worker.worker_name
-                    .as_ref()
-                    .map(|w| w.name.clone())
-                    .unwrap_or_else(|| "UnnamedWorker".to_string()),
-                output_type: worker.response_type.clone(),
-                function_name: worker.component_id.to_string(),
+                worker_type: worker.worker_type.to_string(),
+                response_type: worker.response_mapping.to_string(),
+                component_id: worker.id.to_string(),
             },
             GatewayBindingCompiled::FileServer(fs_binding) => {
                 BindingType::FileServer {
-                    root_dir: fs_binding.clone(),
+                    root_dir: fs_binding.to_string(),
                 }
             },
-            GatewayBindingCompiled::Static(static_binding) => BindingType::Static {
-                content_type: static_binding.content_type.clone(),
-                content: static_binding.content.clone(),
+            GatewayBindingCompiled::Static(static_binding) => {
+                let binding = &**static_binding;
+                BindingType::Static {
+                    content_type: binding.get_content_type().to_string(),
+                    content: binding.get_content().to_vec(),
+                }
             },
         }
     }
@@ -110,7 +107,7 @@ impl<T> From<&CompiledHttpApiDefinition<T>> for ApiDefinition {
             description: format!("API Definition {}", compiled.id.0),
             routes: compiled.routes.iter().map(|route| {
                 Route {
-                    path: route.path.pattern.clone(),
+                    path: route.path.to_string(),
                     method: match route.method {
                         MethodPattern::Get => HttpMethod::Get,
                         MethodPattern::Post => HttpMethod::Post,
@@ -120,9 +117,9 @@ impl<T> From<&CompiledHttpApiDefinition<T>> for ApiDefinition {
                         MethodPattern::Head => HttpMethod::Head,
                         MethodPattern::Options => HttpMethod::Options,
                     },
-                    description: route.metadata.description.clone()
+                    description: route.get_description()
                         .unwrap_or_else(|| "No description available".to_string()),
-                    template_name: route.metadata.template_name.clone()
+                    template_name: route.get_template_name()
                         .unwrap_or_default(),
                     binding: BindingType::from(&route.binding),
                 }

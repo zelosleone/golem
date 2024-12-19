@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
 use openapiv3::{
     ReferenceOr, Schema, SchemaKind, Type as OpenAPIType, StringFormat,
-    VariantOrUnknownOrEmpty, IntegerFormat, NumberFormat, ParameterData, ParameterStyle,
+    VariantOrUnknownOrEmpty, IntegerFormat, NumberFormat,
 };
 use indexmap::IndexMap;
 
@@ -211,91 +211,77 @@ fn number_format_from_str(s: &str) -> VariantOrUnknownOrEmpty<NumberFormat> {
 impl From<OpenAPISchemaType> for Schema {
     fn from(schema: OpenAPISchemaType) -> Self {
         match schema {
-            OpenAPISchemaType::String { format, enum_values, pattern, min_length, max_length } => {
-                Schema {
-                    schema_data: Default::default(),
-                    schema_kind: SchemaKind::Type(OpenAPIType::String(openapiv3::StringType {
-                        format: format.as_deref().map(string_format_from_str),
-                        pattern,
-                        enumeration: enum_values.unwrap_or_default().into_iter().map(Some).collect(),
-                        min_length,
-                        max_length,
-                    })),
-                }
+            OpenAPISchemaType::String { format, enum_values, pattern, min_length, max_length } => Schema {
+                schema_data: Default::default(),
+                schema_kind: SchemaKind::Type(OpenAPIType::String(openapiv3::StringType {
+                    format: format.as_deref().map(string_format_from_str),
+                    pattern,
+                    enumeration: enum_values.unwrap_or_default().into_iter().map(Some).collect(),
+                    min_length,
+                    max_length,
+                })),
             },
-            OpenAPISchemaType::Integer { format, minimum, maximum, multiple_of, exclusive_minimum, exclusive_maximum } => {
-                Schema {
-                    schema_data: Default::default(),
-                    schema_kind: SchemaKind::Type(OpenAPIType::Integer(openapiv3::IntegerType {
-                        format: format.as_deref().map(integer_format_from_str),
-                        multiple_of: multiple_of.map(|x| x as f64),
-                        minimum,
-                        maximum,
-                        exclusive_minimum: exclusive_minimum.unwrap_or(false),
-                        exclusive_maximum: exclusive_maximum.unwrap_or(false),
-                        enumeration: vec![],
-                    })),
-                }
+            OpenAPISchemaType::Integer { format, minimum, maximum, multiple_of, exclusive_minimum, exclusive_maximum } => Schema {
+                schema_data: Default::default(),
+                schema_kind: SchemaKind::Type(OpenAPIType::Integer(openapiv3::IntegerType {
+                    format: format.as_deref().map(integer_format_from_str),
+                    multiple_of: multiple_of.map(|x| x as f64),
+                    minimum,
+                    maximum,
+                    exclusive_minimum: exclusive_minimum.unwrap_or(false),
+                    exclusive_maximum: exclusive_maximum.unwrap_or(false),
+                    enumeration: vec![],
+                })),
             },
-            OpenAPISchemaType::Number { format, minimum, maximum, multiple_of, exclusive_minimum, exclusive_maximum } => {
-                Schema {
-                    schema_data: Default::default(),
-                    schema_kind: SchemaKind::Type(OpenAPIType::Number(openapiv3::NumberType {
-                        format: format.as_deref().map(number_format_from_str),
-                        multiple_of,
-                        minimum,
-                        maximum,
-                        exclusive_minimum: exclusive_minimum.unwrap_or(false),
-                        exclusive_maximum: exclusive_maximum.unwrap_or(false),
-                        enumeration: vec![],
-                    })),
-                }
+            OpenAPISchemaType::Number { format, minimum, maximum, multiple_of, exclusive_minimum, exclusive_maximum } => Schema {
+                schema_data: Default::default(),
+                schema_kind: SchemaKind::Type(OpenAPIType::Number(openapiv3::NumberType {
+                    format: format.as_deref().map(number_format_from_str),
+                    multiple_of,
+                    minimum,
+                    maximum,
+                    exclusive_minimum: exclusive_minimum.unwrap_or(false),
+                    exclusive_maximum: exclusive_maximum.unwrap_or(false),
+                    enumeration: vec![],
+                })),
             },
-            OpenAPISchemaType::Boolean => {
-                Schema {
-                    schema_data: Default::default(),
-                    schema_kind: SchemaKind::Type(OpenAPIType::Boolean(Default::default())),
-                }
+            OpenAPISchemaType::Boolean => Schema {
+                schema_data: Default::default(),
+                schema_kind: SchemaKind::Type(OpenAPIType::Boolean(Default::default())),
             },
             OpenAPISchemaType::Array { items, min_items, max_items, unique_items } => {
                 let items_schema: Schema = (*items).into();
                 Schema {
                     schema_data: Default::default(),
                     schema_kind: SchemaKind::Type(OpenAPIType::Array(openapiv3::ArrayType {
-                        items: Some(Box::new(ReferenceOr::Item(items_schema))),
+                        items: ReferenceOr::Item(Box::new(items_schema)),
                         min_items,
                         max_items,
-                        unique_items
+                        unique_items: unique_items.unwrap_or(false),
                     })),
                 }
             },
             OpenAPISchemaType::Object { properties, required, additional_properties, min_properties, max_properties } => {
                 let mut props = IndexMap::new();
                 for (k, v) in properties {
-                    props.insert(k, ReferenceOr::Item(v.into()));
+                    props.insert(k, ReferenceOr::Item(Schema::from(v)));
                 }
                 Schema {
                     schema_data: Default::default(),
                     schema_kind: SchemaKind::Type(OpenAPIType::Object(openapiv3::ObjectType {
                         properties: props,
                         required: required.unwrap_or_default(),
-                        additional_properties: additional_properties.map(|schema| {
-                            Box::new(ReferenceOr::Item((*schema).into()))
-                        }),
+                        additional_properties: additional_properties.map(|s| ReferenceOr::Item(Schema::from(*s))),
                         min_properties,
                         max_properties,
                     })),
                 }
             },
-            OpenAPISchemaType::Reference { reference } => {
-                // We use AllOf with a single reference for representation.
-                // Another approach might be needed depending on tooling expectations.
-                Schema {
-                    schema_data: Default::default(),
-                    schema_kind: SchemaKind::AllOf {
-                        all_of: vec![ReferenceOr::Reference { reference }],
-                    },
-                }
+            OpenAPISchemaType::Reference { reference } => Schema {
+                schema_data: Default::default(),
+                schema_kind: SchemaKind::Reference {
+                    reference,
+                },
             },
         }
     }
