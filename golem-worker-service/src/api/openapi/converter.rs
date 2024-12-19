@@ -1,5 +1,6 @@
 use crate::api::definition::types::{ApiDefinition, Route, HttpMethod, BindingType};
 use crate::api::definition::patterns::{AllPathPatterns, PathPattern};
+use crate::api::openapi::types::{OpenAPISchemaType, Parameter};
 use golem_wasm_ast::analysis::{
     AnalysedType,
     TypeStr, TypeBool, TypeList, TypeRecord,
@@ -142,7 +143,7 @@ impl OpenAPIConverter {
         // Convert path parameters
         if let Some(path_params) = Self::extract_path_parameters(&route.path) {
             for param in path_params {
-                params.push(ReferenceOr::Item(param.into_openapi()));
+                params.push(ReferenceOr::Item(param.into()));
             }
         }
 
@@ -168,7 +169,7 @@ impl OpenAPIConverter {
                     }
 
                     // Default to string schema for path params
-                    let schema = crate::api::openapi::types::Schema::String { format: None, enum_values: None };
+                    let schema = OpenAPISchemaType::String { format: None, enum_values: None };
                     let description = format!("Path parameter: {}", info.key_name);
 
                     Some(Parameter {
@@ -191,8 +192,8 @@ impl OpenAPIConverter {
                         name: info.key_name.clone(),
                         r#in: ParameterLocation::Path,
                         required: Some(true),
-                        schema: crate::api::openapi::types::Schema::Array {
-                            items: Box::new(crate::api::openapi::types::Schema::String {
+                        schema: OpenAPISchemaType::Array {
+                            items: Box::new(OpenAPISchemaType::String {
                                 format: None,
                                 enum_values: None
                             })
@@ -225,7 +226,7 @@ impl OpenAPIConverter {
 
     fn create_request_body(route: &Route) -> Option<OpenApiRequestBody> {
         if let BindingType::Default { input_type, .. } = &route.binding {
-            let schema = analysed_type_to_schema(input_type);
+            let schema = analysed_type_to_schema(&input_type);
 
             let mut content = IndexMap::new();
             content.insert(
@@ -387,81 +388,54 @@ impl OpenAPIConverter {
 }
 
 fn analysed_type_to_schema(typ: &AnalysedType) -> ReferenceOr<Schema> {
-    match typ {
-        AnalysedType::Bool(_) => ReferenceOr::Item(Schema {
-            schema_data: Default::default(),
-            schema_kind: openapiv3::SchemaKind::Type(openapiv3::Type::Boolean {
-                enumeration: vec![]
-            })
-        }),
-        AnalysedType::S8(_) | AnalysedType::S16(_) | AnalysedType::S32(_) | AnalysedType::S64(_)
-        | AnalysedType::U8(_) | AnalysedType::U16(_) | AnalysedType::U32(_) | AnalysedType::U64(_) => integer_schema(None),
-        AnalysedType::F32(_) | AnalysedType::F64(_) => number_schema(None),
-        AnalysedType::Chr(_) => string_schema(None),
-        AnalysedType::Str(_) => string_schema(None),
-        AnalysedType::List(l) => {
-            let inner = analysed_type_to_schema(&l.inner);
-            ReferenceOr::Item(Schema {
-                schema_data: Default::default(),
-                schema_kind: openapiv3::SchemaKind::Type(openapiv3::Type::Array(ArrayType {
-                    items: Some(Box::new(inner)),
-                    min_items: None,
-                    max_items: None,
-                    unique_items: false,
-                })),
-            })
+    let schema = match typ {
+        AnalysedType::Bool(_) => OpenAPISchemaType::Boolean,
+        AnalysedType::S32(_) | AnalysedType::S64(_) => OpenAPISchemaType::Integer {
+            format: None,
         },
-        AnalysedType::Tuple(t) => {
-            // Tuples can be represented as arrays in OpenAPI. We'll just do a generic array:
-            // If you know the tuple fields, represent them as `oneOf` or a fixed array schema.
-            // For simplicity, just do a generic array:
-            ReferenceOr::Item(Schema {
-                schema_data: Default::default(),
-                schema_kind: openapiv3::SchemaKind::Type(openapiv3::Type::Array(ArrayType {
-                    items: None,
-                    min_items: None,
-                    max_items: None,
-                    unique_items: false,
-                })),
-            })
+        AnalysedType::F32(_) | AnalysedType::F64(_) => OpenAPISchemaType::Number {
+            format: None,
+        },
+        AnalysedType::Chr(_) => OpenAPISchemaType::String {
+            format: None,
+            enum_values: None,
+        },
+        AnalysedType::Str(_) => OpenAPISchemaType::String {
+            format: None,
+            enum_values: None,
+        },
+        AnalysedType::List(l) => OpenAPISchemaType::Array {
+            items: Box::new(analysed_type_to_schema(&l.inner).into()),
+        },
+        AnalysedType::Tuple(_) => OpenAPISchemaType::Array {
+            items: Box::new(OpenAPISchemaType::String {
+                format: None,
+                enum_values: None,
+            }),
         },
         AnalysedType::Record(r) => {
             let mut properties = IndexMap::new();
             for field in &r.fields {
-                properties.insert(field.name.clone(), analysed_type_to_schema(&field.typ));
+                properties.insert(field.name.clone(), analysed_type_to_schema(&field.typ).into());
             }
-            ReferenceOr::Item(Schema {
-                schema_data: Default::default(),
-                schema_kind: openapiv3::SchemaKind::Type(openapiv3::Type::Object(ObjectType {
-                    properties,
-                    required: r.fields.iter().map(|f| f.name.clone()).collect(),
-                    additional_properties: None,
-                    min_properties: None,
-                    max_properties: None,
-                })),
-            })
+            OpenAPISchemaType::Object {
+                properties,
+                required: r.fields.iter().map(|f| f.name.clone()).collect(),
+            }
         },
-        AnalysedType::Flags(_) => {
-            // Represent flags as a string enum or boolean properties. For simplicity, just do string:
-            string_schema(None)
+        AnalysedType::Flags(_) => OpenAPISchemaType::String {
+            format: None,
+            enum_values: None,
         },
-        AnalysedType::Enum(e) => {
-            // Represent enum as a string with enumeration:
-            let enumeration: Vec<Option<String>> = e.variants.iter().map(|v| Some(v.name.clone())).collect();
-            ReferenceOr::Item(Schema {
-                schema_data: Default::default(),
-                schema_kind: openapiv3::SchemaKind::Type(openapiv3::Type::String(StringType {
-                    format: None,
-                    pattern: None,
-                    enumeration,
-                    min_length: None,
-                    max_length: None,
-                })),
-            })
+        AnalysedType::Enum(e) => OpenAPISchemaType::String {
+            format: None,
+            enum_values: Some(e.variants.iter().map(|v| v.name.clone()).collect()),
         },
-    }
+    };
+    ReferenceOr::Item(schema.into())
 }
 
+// Update schema creation functions to use OpenAPISchemaType
 fn boolean_schema() -> ReferenceOr<Schema> {
     ReferenceOr::Item(Schema {
         schema_data: Default::default(),

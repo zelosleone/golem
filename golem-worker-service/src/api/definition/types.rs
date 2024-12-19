@@ -1,12 +1,17 @@
 use serde::{Deserialize, Serialize};
 use golem_worker_service_base::gateway_api_definition::http::CompiledHttpApiDefinition;
+use golem_worker_service_base::gateway_binding::gateway_binding_compiled::GatewayBindingCompiled;
 
 /// Base binding types for the API Gateway
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum BindingType {
     Http,
-    Worker,
+    Worker {
+        input_type: String,
+        output_type: String,
+        function_name: String,
+    },
     Proxy,
     #[serde(rename = "Default")]
     Default {
@@ -37,6 +42,22 @@ impl std::fmt::Display for BindingType {
                 write!(f, "SwaggerUI({})", spec_path)
             },
             _ => write!(f, "{:?}", self),
+        }
+    }
+}
+
+impl From<&GatewayBindingCompiled> for BindingType {
+    fn from(binding: &GatewayBindingCompiled) -> Self {
+        match binding {
+            GatewayBindingCompiled::Worker(worker) => BindingType::Worker {
+                input_type: worker.input_type.to_string(),
+                output_type: worker.output_type.to_string(),
+                function_name: worker.function_name.clone(),
+            },
+            GatewayBindingCompiled::FileServer(fs) => BindingType::FileServer {
+                root_dir: fs.root_dir.clone(),
+            },
+            _ => BindingType::Http,
         }
     }
 }

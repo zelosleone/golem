@@ -1,7 +1,8 @@
 use crate::api::definition::types::{ApiDefinition, BindingType};
 use golem_wasm_ast::analysis::AnalysedType;
-use wasm_ast::analysis::model::{TypeI32, TypeI64, TypeF32, TypeF64, TypeUnit}; 
-use golem_wasm_ast::analysis::{TypeStr, TypeBool, TypeList, TypeOption, TypeRecord, TypeResult};
+
+// Remove incorrect imports
+// use wasm_ast::analysis::model::{TypeI32, TypeI64, TypeF32, TypeF64, TypeUnit}; 
 
 #[derive(Debug, PartialEq)]
 enum TypeConstraint {
@@ -46,14 +47,13 @@ fn validate_wit_binding_types(
 
 fn validate_type_constraints(typ: &AnalysedType, constraint: TypeConstraint) -> Result<(), String> {
     match (typ, constraint) {
-        // Validate primitive types
         (AnalysedType::Str(_), _) |
-        (AnalysedType::I32(_), _) |
-        (AnalysedType::I64(_), _) |
+        (AnalysedType::S32(_), _) |
+        (AnalysedType::S64(_), _) |
         (AnalysedType::F32(_), _) |
         (AnalysedType::F64(_), _) |
         (AnalysedType::Bool(_), _) |
-        (AnalysedType::Empty(_), _) => Ok(()),
+        (AnalysedType::Unit(_), _) => Ok(()),
 
         // Validate lists
         (AnalysedType::List(l), c) => validate_type_constraints(&l.inner, c),
@@ -87,12 +87,12 @@ fn are_types_compatible(input: &AnalysedType, output: &AnalysedType) -> bool {
     match (input, output) {
         // Check primitive type compatibility
         (AnalysedType::Str(_), AnalysedType::Str(_)) |
-        (AnalysedType::I32(_), AnalysedType::I32(_)) |
-        (AnalysedType::I64(_), AnalysedType::I64(_)) |
+        (AnalysedType::S32(_), AnalysedType::S32(_)) |
+        (AnalysedType::S64(_), AnalysedType::S64(_)) |
         (AnalysedType::F32(_), AnalysedType::F32(_)) |
         (AnalysedType::F64(_), AnalysedType::F64(_)) |
         (AnalysedType::Bool(_), AnalysedType::Bool(_)) |
-        (AnalysedType::Empty(_), AnalysedType::Empty(_)) => true,
+        (AnalysedType::Unit(_), AnalysedType::Unit(_)) => true,
 
         // Check list compatibility
         (AnalysedType::List(l1), AnalysedType::List(l2)) => 

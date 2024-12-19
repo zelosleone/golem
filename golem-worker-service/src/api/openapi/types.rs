@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
-use openapiv3::{ReferenceOr, Schema};
+use openapiv3::{ReferenceOr, Schema, SchemaKind, Type as OpenAPIType};
 use indexmap::IndexMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,9 +47,9 @@ pub struct Parameter {
     pub r#in: ParameterLocation,
     pub description: Option<String>,
     pub required: Option<bool>,
-    pub schema: Schema,
+    pub schema: OpenAPISchemaType,
     pub style: Option<String>,
-     pub explode: Option<bool>,
+    pub explode: Option<bool>,
 }
 
 
@@ -91,11 +91,12 @@ pub struct GolemComponents {
     pub security_schemes: Option<HashMap<String, SecurityScheme>>,
 }
 
+// Rename Schema to avoid conflicts
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum Schema {
+pub enum OpenAPISchemaType {
     String {
         format: Option<String>,
-         enum_values: Option<Vec<String>>
+        enum_values: Option<Vec<String>>
     },
     Integer {
         format: Option<String>,
@@ -104,15 +105,15 @@ pub enum Schema {
         format: Option<String>,
     },
     Boolean,
-     Array {
-        items: Box<Schema>
+    Array {
+        items: Box<OpenAPISchemaType>
     },
     Object {
-        properties: HashMap<String, Schema>,
+        properties: HashMap<String, OpenAPISchemaType>,
         required: Option<Vec<String>>,
-         additional_properties: Option<Box<Schema>>,
     },
-    Ref {
+    Reference {
+        #[serde(rename = "$ref")]
         reference: String,
     }
 }
@@ -172,6 +173,53 @@ impl IntoRaw<openapiv3::Parameter> for Parameter {
             style: self.style.map(|s| s.into()),
             allow_reserved: false,
             allow_empty_value: None,
+        }
+    }
+}
+
+impl From<OpenAPISchemaType> for Schema {
+    fn from(schema: OpenAPISchemaType) -> Self {
+        let schema_kind = match schema {
+            OpenAPISchemaType::String { format, enum_values } => {
+                SchemaKind::Type(OpenAPIType::String(openapiv3::StringType {
+                    format: format.map(|f| f.into()),
+                    enumeration: enum_values.map(|v| v.into_iter().map(Some).collect()).unwrap_or_default(),
+                    ..Default::default()
+                }))
+            },
+            OpenAPISchemaType::Integer { format } => {
+                SchemaKind::Type(OpenAPIType::Integer(openapiv3::IntegerType {
+                    format: format.map(|f| f.into()),
+                    ..Default::default()
+                }))
+            },
+            // ...add other conversions similarly
+        };
+        Schema {
+            schema_kind,
+            schema_data: Default::default(),
+        }
+    }
+}
+
+impl From<Parameter> for openapiv3::Parameter {
+    fn from(param: Parameter) -> Self {
+        openapiv3::Parameter::Path {
+            parameter_data: openapiv3::ParameterData {
+                name: param.name,
+                description: param.description,
+                required: param.required.unwrap_or(true),
+                deprecated: None,
+                format: openapiv3::ParameterSchemaOrContent::Schema(Box::new(ReferenceOr::Item(
+                    param.schema.into()
+                ))),
+                example: None,
+                examples: Default::default(),
+                explode: param.explode.unwrap_or(false),
+                extensions: Default::default(),
+            },
+            style: param.style.map(|s| s.parse().unwrap_or(openapiv3::PathStyle::Simple))
+                .unwrap_or(openapiv3::PathStyle::Simple),
         }
     }
 }
