@@ -250,3 +250,34 @@ fn test_swagger_ui_binding() {
         panic!("Expected GET operation for SwaggerUI");
     }
 }
+
+#[test]
+fn test_multi_segment_path_parameters() {
+    let route = create_test_route(
+        "/files/{path..}",
+        HttpMethod::Get,
+        "string",
+        "string",
+    );
+
+    let api = ApiDefinition {
+        id: "test".to_string(),
+        name: "Test API".to_string(),
+        version: "1.0".to_string(),
+        description: "Test API".to_string(),
+        routes: vec![route],
+    };
+
+    let spec = OpenAPIConverter::convert(&api);
+    let path_item = spec.paths.get("/files/{path}").unwrap();
+    
+    if let Some(parameters) = &path_item.parameters {
+        assert_eq!(parameters.len(), 1);
+        assert_eq!(parameters[0].name, "path");
+        assert!(parameters[0].required == Some(true));
+        // Multi-segment parameters should be documented in the description
+        assert!(parameters[0].description.as_ref().unwrap().contains("multi-segment"));
+    } else {
+        panic!("Expected path parameters");
+    }
+}

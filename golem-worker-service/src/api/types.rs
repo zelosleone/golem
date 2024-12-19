@@ -205,6 +205,13 @@ pub enum BindingType {
         spec_path: String,
         options: Option<SwaggerUIOptions>,
     },
+    Worker {
+        input_type: AnalysedType,
+        output_type: AnalysedType,
+        options: Option<WorkerOptions>,
+    },
+    Http,
+    Proxy,
     Static {
         content_type: String,
         content: Vec<u8>,
@@ -230,3 +237,5 @@ pub struct SwaggerUIOptions {
     pub title: Option<String>,
     pub theme: Option<String>,
 }
+
+// ... rest of the code remains the same ...

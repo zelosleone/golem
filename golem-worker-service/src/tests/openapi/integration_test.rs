@@ -10,6 +10,8 @@ use axum::{
     body::Body,
     http::{Request, StatusCode},
     response::Response,
+    routing::get,
+    Router,
 };
 use serde_json::json;
 use tempfile::TempDir;
@@ -157,6 +159,52 @@ class TestApiClient {{
 }}
         "#
     )
+}
+
+#[tokio::test]
+async fn test_api_definition_export() {
+    let api = create_test_api().await;
+    let api_id = api.id.clone();
+    let api_version = api.version.clone();
+
+    // Create a test route with the export endpoint
+    let route = Router::new()
+        .route(
+            "/v1/api/definitions/:id/version/:version/export",
+            get(|Path((id, version)): Path<(String, String)>| async move {
+                let api_def = ApiDefinition {
+                    id: id.clone(),
+                    version: version.clone(),
+                    ..api.clone()
+                };
+                let converter = OpenAPIConverter;
+                let openapi = converter.convert(&api_def);
+                Json(openapi)
+            }),
+        );
+
+    // Test the export endpoint
+    let response = route
+        .oneshot(
+            Request::builder()
+                .uri(format!("/v1/api/definitions/{}/version/{}/export", api_id, api_version))
+                .method("GET")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+    let openapi: OpenAPISpec = serde_json::from_slice(&body).unwrap();
+
+    // Validate the exported OpenAPI spec
+    assert!(validate_openapi(&openapi).is_ok());
+    assert_eq!(openapi.info.title, api.name);
+    assert_eq!(openapi.info.version, api.version);
+    assert_eq!(openapi.paths.len(), api.routes.len());
 }
 
 #[tokio::test]
