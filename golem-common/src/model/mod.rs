@@ -12,25 +12,39 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::model::oplog::{DeletedRegions, OplogEntry, OplogIndex, TimestampedUpdateDescription};
-use crate::model::regions::*;
-use bincode::{Decode, Encode};
-use golem_wasm_ast::AnalysedType;
-use golem_wasm_ast::analysis::analysed_type as ast;
-use serde::{Deserialize, Serialize};
+use crate::newtype_uuid;
+use crate::uri::oss::urn::WorkerUrn;
+use bincode::{BorrowDecode, Decode, Encode};
+use bincode::de::{BorrowDecoder, Decoder};
+use bincode::enc::Encoder;
+use bincode::error::{DecodeError, EncodeError};
+use golem_wasm_ast::analysis::AnalysedType;
+use golem_wasm_ast::analysis::analysed_type::{field, list, r#enum, record, s64, str as wasm_str, tuple, u32 as wasm_u32, u64 as wasm_u64};
+use golem_wasm_rpc::{IntoValue, Value};
+use http::Uri;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde::de::{self, Unexpected, Visitor};
-use std::collections::HashMap;
+use std::cmp::Ordering;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::{Display, Formatter};
+use std::str::{self, FromStr};
 use std::time::{Duration, SystemTime};
+use typed_path::Utf8UnixPathBuf;
 use uuid::{uuid, Uuid};
 
 pub mod api_types;
+pub mod component;
 pub mod oplog;
+pub mod plugin;
+pub mod protobuf;
 pub mod regions;
 pub mod snapshot;
 
 pub use api_types::*;
+pub use component::*;
 pub use oplog::*;
+pub use plugin::*;
+pub use protobuf::*;
 pub use regions::*;
 pub use snapshot::*;
 
@@ -179,7 +193,7 @@ impl IntoValue for Timestamp {
 
 pub type ComponentVersion = u64;
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Encode, Decode, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Encode, Decode, Serialize, Deserialize)]
 #[cfg_attr(feature = "poem", derive(poem_openapi::Object))]
 #[cfg_attr(feature = "poem", oai(rename_all = "camelCase"))]
 #[serde(rename_all = "camelCase")]
@@ -546,108 +560,6 @@ pub struct NumberOfShards {
     pub value: usize,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Pod {
-    host: String,
-    port: u16,
-}
-
-impl Pod {
-    pub fn uri(&self) -> Uri {
-        Uri::builder()
-            .scheme("http")
-            .authority(format!("{}:{}", self.host, self.port).as_str())
-            .path_and_query("/")
-            .build()
-            .expect("Failed to build URI")
-    }
-}
-
-#[derive(Clone)]
-pub struct RoutingTable {
-    pub number_of_shards: NumberOfShards,
-    shard_assignments: HashMap<ShardId, Pod>,
-}
-
-impl RoutingTable {
-    pub fn lookup(&self, worker_id: &WorkerId) -> Option<&Pod> {
-        self.shard_assignments.get(&ShardId::from_worker_id(
-            &worker_id.clone(),
-            self.number_of_shards.value,
-        ))
-    }
-
-    pub fn random(&self) -> Option<&Pod> {
-        self.shard_assignments
-            .values()
-            .choose(&mut rand::thread_rng())
-    }
-
-    pub fn first(&self) -> Option<&Pod> {
-        self.shard_assignments.values().next()
-    }
-
-    pub fn all(&self) -> HashSet<&Pod> {
-        self.shard_assignments.values().collect()
-    }
-}
-
-#[allow(dead_code)]
-pub struct RoutingTableEntry {
-    shard_id: ShardId,
-    pod: Pod,
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct ShardAssignment {
-    pub number_of_shards: usize,
-    pub shard_ids: HashSet<ShardId>,
-}
-
-impl ShardAssignment {
-    pub fn new(number_of_shards: usize, shard_ids: HashSet<ShardId>) -> Self {
-        Self {
-            number_of_shards,
-            shard_ids,
-        }
-    }
-
-    pub fn assign_shards(&mut self, shard_ids: &HashSet<ShardId>) {
-        for shard_id in shard_ids {
-            self.shard_ids.insert(*shard_id);
-        }
-    }
-
-    pub fn register(&mut self, number_of_shards: usize, shard_ids: &HashSet<ShardId>) {
-        self.number_of_shards = number_of_shards;
-        for shard_id in shard_ids {
-            self.shard_ids.insert(*shard_id);
-        }
-    }
-
-    pub fn revoke_shards(&mut self, shard_ids: &HashSet<ShardId>) {
-        for shard_id in shard_ids {
-            self.shard_ids.remove(shard_id);
-        }
-    }
-}
-
-impl Display for ShardAssignment {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let shard_ids = self
-            .shard_ids
-            .iter()
-            .map(|shard_id| shard_id.to_string())
-            .collect::<Vec<_>>()
-            .join(",");
-        write!(
-            f,
-            "{{ number_of_shards: {}, shard_ids: {} }}",
-            self.number_of_shards, shard_ids
-        )
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct WorkerMetadata {
     pub worker_id: WorkerId,
@@ -701,7 +613,7 @@ impl IntoValue for WorkerMetadata {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Encode, Decode)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Encode, Decode)]
 #[cfg_attr(feature = "poem", derive(poem_openapi::Object))]
 #[cfg_attr(feature = "poem", oai(rename_all = "camelCase"))]
 #[serde(rename_all = "camelCase")]
@@ -1285,7 +1197,7 @@ impl FromStr for ComponentType {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "poem", derive(poem_openapi::Object))]
 #[cfg_attr(feature = "poem", oai(rename_all = "camelCase"))]
 #[serde(rename_all = "camelCase")]
@@ -1405,91 +1317,100 @@ impl<'de> Deserialize<'de> for GatewayBindingType {
     where
         D: Deserializer<'de>,
     {
-        struct GatewayBindingTypeVisitor;
-
-        impl<'de> Visitor<'de> for GatewayBindingTypeVisitor {
-            type Value = GatewayBindingType;
-
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                formatter.write_str("a string containing a gateway binding type")
-            }
-
-            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                match value {
-                    "http" => Ok(GatewayBindingType::Http),
-                    "https" => Ok(GatewayBindingType::Https),
-                    "grpc" => Ok(GatewayBindingType::Grpc),
-                    other => Err(E::invalid_value(
-                        Unexpected::Str(other),
-                        &"one of: 'http', 'https', 'grpc'",
-                    )),
-                }
-            }
-        }
-
-        deserializer.deserialize_str(GatewayBindingTypeVisitor)
-    }
-}
-
-impl TryFrom<String> for GatewayBindingType {
-    type Error = String;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        match value.as_str() {
-            "default" => Ok(GatewayBindingType::Default),
-            "file-server" => Ok(GatewayBindingType::FileServer),
-            "cors-preflight" => Ok(GatewayBindingType::CorsPreflight),
-            "auth-callback" => Ok(GatewayBindingType::AuthCallback),
-            "swagger-ui" => Ok(GatewayBindingType::SwaggerUi),
-            _ => Err(format!("Invalid WorkerBindingType: {}", value)),
-        }
+        let s = String::deserialize(deserializer)?;
+        GatewayBindingType::from_str(&s).map_err(de::Error::custom)
     }
 }
 
 impl FromStr for GatewayBindingType {
     type Err = String;
 
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value {
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
             "default" | "wit-worker" => Ok(GatewayBindingType::Default),
             "file-server" => Ok(GatewayBindingType::FileServer),
             "cors-preflight" => Ok(GatewayBindingType::CorsPreflight),
             "auth-callback" => Ok(GatewayBindingType::AuthCallback),
             "swagger-ui" => Ok(GatewayBindingType::SwaggerUi),
-            _ => Err(format!("Invalid WorkerBindingType: {}", value)),
+            _ => Err(format!("Invalid binding type: {}", s)),
         }
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "poem", derive(poem_openapi::Enum))]
-#[serde(rename_all = "kebab-case")]
-#[cfg_attr(feature = "poem", oai(rename_all = "kebab-case"))]
-pub enum ComponentFilePermissions {
-    ReadOnly,
-    ReadWrite,
+impl fmt::Display for GatewayBindingType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            GatewayBindingType::Default => write!(f, "default"),
+            GatewayBindingType::FileServer => write!(f, "file-server"),
+            GatewayBindingType::CorsPreflight => write!(f, "cors-preflight"),
+            GatewayBindingType::AuthCallback => write!(f, "auth-callback"),
+            GatewayBindingType::SwaggerUi => write!(f, "swagger-ui"),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ComponentFilePermissions {
+    pub read_only: bool,
 }
 
 impl ComponentFilePermissions {
-    pub fn as_compact_str(&self) -> &'static str {
-        match self {
-            ComponentFilePermissions::ReadOnly => "ro",
-            ComponentFilePermissions::ReadWrite => "rw",
+    pub fn to_compact_str(&self) -> &'static str {
+        if self.read_only {
+            "ro"
+        } else {
+            "rw"
         }
     }
+
     pub fn from_compact_str(s: &str) -> Result<Self, String> {
         match s {
-            "ro" => Ok(ComponentFilePermissions::ReadOnly),
-            "rw" => Ok(ComponentFilePermissions::ReadWrite),
+            "ro" => Ok(ComponentFilePermissions { read_only: true }),
+            "rw" => Ok(ComponentFilePermissions { read_only: false }),
             _ => Err(format!("Unknown permissions: {}", s)),
         }
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+impl Default for ComponentFilePermissions {
+    fn default() -> Self {
+        ComponentFilePermissions { read_only: false }
+    }
+}
+
+impl Serialize for ComponentFilePermissions {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.to_compact_str().serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ComponentFilePermissions {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Self::from_compact_str(&s).map_err(serde::de::Error::custom)
+    }
+}
+
+impl Encode for ComponentFilePermissions {
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        self.read_only.encode(encoder)
+    }
+}
+
+impl Decode for ComponentFilePermissions {
+    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+        let read_only = bool::decode(decoder)?;
+        Ok(ComponentFilePermissions { read_only })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "poem", derive(poem_openapi::Object))]
 #[cfg_attr(feature = "poem", oai(rename_all = "camelCase"))]
 #[serde(rename_all = "camelCase")]
@@ -1501,7 +1422,7 @@ pub struct InitialComponentFile {
 
 impl InitialComponentFile {
     pub fn is_read_only(&self) -> bool {
-        self.permissions == ComponentFilePermissions::ReadOnly
+        self.permissions.read_only
     }
 }
 
@@ -1624,5 +1545,105 @@ impl IntoValue for Uri {
 
     fn get_type() -> AnalysedType {
         ast::wasm_str()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Encode, Decode, Serialize, Deserialize)]
+#[cfg_attr(feature = "poem", derive(poem_openapi::Enum))]
+pub enum WorkerEvent {
+    Started {
+        worker_id: Uuid,
+        component_id: ComponentId,
+    },
+    Stopped {
+        worker_id: Uuid,
+        component_id: ComponentId,
+        reason: String,
+    },
+    Failed {
+        worker_id: Uuid,
+        component_id: ComponentId,
+        error: String,
+    },
+}
+
+impl Encode for WorkerEvent {
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        match self {
+            WorkerEvent::Started { worker_id, component_id } => {
+                0u8.encode(encoder)?;
+                worker_id.encode(encoder)?;
+                component_id.encode(encoder)
+            }
+            WorkerEvent::Stopped { worker_id, component_id, reason } => {
+                1u8.encode(encoder)?;
+                worker_id.encode(encoder)?;
+                component_id.encode(encoder)?;
+                reason.encode(encoder)
+            }
+            WorkerEvent::Failed { worker_id, component_id, error } => {
+                2u8.encode(encoder)?;
+                worker_id.encode(encoder)?;
+                component_id.encode(encoder)?;
+                error.encode(encoder)
+            }
+        }
+    }
+}
+
+impl Decode for WorkerEvent {
+    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+        match u8::decode(decoder)? {
+            0 => Ok(WorkerEvent::Started {
+                worker_id: Uuid::decode(decoder)?,
+                component_id: ComponentId::decode(decoder)?,
+            }),
+            1 => Ok(WorkerEvent::Stopped {
+                worker_id: Uuid::decode(decoder)?,
+                component_id: ComponentId::decode(decoder)?,
+                reason: String::decode(decoder)?,
+            }),
+            2 => Ok(WorkerEvent::Failed {
+                worker_id: Uuid::decode(decoder)?,
+                component_id: ComponentId::decode(decoder)?,
+                error: String::decode(decoder)?,
+            }),
+            tag => Err(DecodeError::UnexpectedVariant {
+                found: tag as _,
+                type_name: "WorkerEvent",
+                allowed_variants: &[0, 1, 2],
+            }),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "poem", derive(poem_openapi::Object))]
+#[cfg_attr(feature = "poem", oai(rename_all = "camelCase"))]
+#[serde(rename_all = "camelCase")]
+pub struct AnalysedTypeWrapper<T> 
+where 
+    T: Clone + std::fmt::Debug + PartialEq + Serialize + for<'de> Deserialize<'de>
+{
+    #[serde(bound(deserialize = "T: Deserialize<'de>"))]
+    pub inner: T,
+}
+
+impl<T> Encode for AnalysedTypeWrapper<T>
+where
+    T: Clone + std::fmt::Debug + PartialEq + Serialize + for<'de> Deserialize<'de> + Encode,
+{
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        self.inner.encode(encoder)
+    }
+}
+
+impl<T> Decode for AnalysedTypeWrapper<T>
+where
+    T: Clone + std::fmt::Debug + PartialEq + Serialize + for<'de> Deserialize<'de> + Decode,
+{
+    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+        let inner = T::decode(decoder)?;
+        Ok(AnalysedTypeWrapper { inner })
     }
 }
