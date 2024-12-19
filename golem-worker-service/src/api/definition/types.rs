@@ -75,21 +75,16 @@ impl<T> From<&CompiledHttpApiDefinition<T>> for ApiDefinition {
                     .unwrap_or_else(|| String::from("No description available")),
                 template_name: route.metadata.template_name.clone(),
                 binding: match &route.binding {
-                    golem_worker_service_base::gateway_binding::GatewayBinding::Default { input_type, output_type, function_name } => {
+                    golem_worker_service_base::gateway_binding::GatewayBindingCompiled::Default { input_type, output_type, function_name } => {
                         BindingType::Default {
                             input_type: input_type.to_string(),
                             output_type: output_type.to_string(),
                             function_name: function_name.clone(),
                         }
                     },
-                    golem_worker_service_base::gateway_binding::GatewayBinding::FileServer { root_dir } => {
+                    golem_worker_service_base::gateway_binding::GatewayBindingCompiled::FileServer(root_dir) => {
                         BindingType::FileServer {
                             root_dir: root_dir.clone(),
-                        }
-                    },
-                    golem_worker_service_base::gateway_binding::GatewayBinding::SwaggerUI { spec_path } => {
-                        BindingType::SwaggerUI {
-                            spec_path: spec_path.clone(),
                         }
                     },
                     _ => BindingType::Http, // Default for other bindings

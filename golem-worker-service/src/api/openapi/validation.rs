@@ -1,7 +1,7 @@
 use super::types::{OpenAPISpec, PathItem, ParameterLocation};
 use std::collections::HashMap;
 use super::error::OpenAPIError;
-use openapiv3::{Schema as OpenAPISchema, Operation, ReferenceOr, SchemaKind};
+use openapiv3::{Operation, ReferenceOr, SchemaKind};
 use crate::api::definition::patterns::{AllPathPatterns, PathPattern};
 use tracing::warn;
 
@@ -220,21 +220,19 @@ fn validate_parameter_schema(schema: &crate::api::openapi::OpenAPISchema) -> Res
 }
 
 mod tests {
-    use super::{validate_parameter_name, validate_catch_all_name};
-
     #[test]
     fn test_parameter_name_validation() {
-        assert!(validate_parameter_name("user_id"));
-        assert!(validate_parameter_name("count123"));
-        assert!(!validate_parameter_name("_hidden"));
-        assert!(!validate_parameter_name("invalid-name"));
-        assert!(!validate_parameter_name(""));
+        assert!(super::validate_parameter_name("user_id"));
+        assert!(super::validate_parameter_name("count123"));
+        assert!(!super::validate_parameter_name("_hidden"));
+        assert!(!super::validate_parameter_name("invalid-name"));
+        assert!(!super::validate_parameter_name(""));
     }
 
     #[test]
     fn test_catch_all_validation() {
-        assert!(validate_catch_all_name("all_files"));
-        assert!(!validate_catch_all_name("bad__name"));
-        assert!(!validate_catch_all_name("_invalid"));
+        assert!(super::validate_catch_all_name("all_files"));
+        assert!(!super::validate_catch_all_name("bad__name"));
+        assert!(!super::validate_catch_all_name("_invalid"));
     }
 }

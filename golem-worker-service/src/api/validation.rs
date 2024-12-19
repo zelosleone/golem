@@ -1,10 +1,9 @@
 use crate::api::definition::types::{ApiDefinition, BindingType};
 use golem_wasm_ast::analysis::{
     AnalysedType, TypeStr, TypeF32, TypeF64, TypeBool, 
-    TypeList, TypeOption, TypeRecord, TypeResult, NameTypePair,
+    TypeList, TypeOption, TypeRecord, TypeResult, NameTypePair, TypeUnit,
+    TypeI32, TypeI64,
 };
-
-use openapiv3::SchemaKind;
 
 #[derive(Debug, PartialEq)]
 enum TypeConstraint {
@@ -26,12 +25,12 @@ pub fn validate_api_definition(api: &ApiDefinition) -> Result<(), String> {
 fn parse_type(type_str: &str) -> Result<AnalysedType, String> {
     match type_str {
         "string" => Ok(AnalysedType::Str(TypeStr)),
-        "i32" => Ok(AnalysedType::F32(TypeF32)),
-        "i64" => Ok(AnalysedType::F64(TypeF64)),
+        "i32" => Ok(AnalysedType::I32(TypeI32)),
+        "i64" => Ok(AnalysedType::I64(TypeI64)),
         "f32" => Ok(AnalysedType::F32(TypeF32)),
         "f64" => Ok(AnalysedType::F64(TypeF64)),
         "bool" => Ok(AnalysedType::Bool(TypeBool)),
-        "void" => Ok(AnalysedType::Unit(TypeUnit)),
+        "void" => Ok(AnalysedType::Empty(TypeUnit)),
         t if t.starts_with("list<") => {
             let inner_type = t.trim_start_matches("list<").trim_end_matches('>');
             let inner = parse_type(inner_type)?;
@@ -109,7 +108,7 @@ fn validate_type_constraints(typ: &AnalysedType, constraint: TypeConstraint) -> 
         (AnalysedType::F32(_), _) |
         (AnalysedType::F64(_), _) |
         (AnalysedType::Bool(_), _) |
-        (AnalysedType::Unit(_), _) => Ok(()),
+        (AnalysedType::Empty(_), _) => Ok(()),
 
         // Validate lists
         (AnalysedType::List(l), c) => validate_type_constraints(&l.inner, c),
@@ -148,7 +147,7 @@ fn are_types_compatible(input: &AnalysedType, output: &AnalysedType) -> bool {
         (AnalysedType::F32(_), AnalysedType::F32(_)) |
         (AnalysedType::F64(_), AnalysedType::F64(_)) |
         (AnalysedType::Bool(_), AnalysedType::Bool(_)) |
-        (AnalysedType::Unit(_), AnalysedType::Unit(_)) => true,
+        (AnalysedType::Empty(_), AnalysedType::Empty(_)) => true,
 
         // Check list compatibility
         (AnalysedType::List(l1), AnalysedType::List(l2)) => 

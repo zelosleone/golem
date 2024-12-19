@@ -1,10 +1,11 @@
 use crate::api::definition::{HttpMethod, BindingType, ApiDefinition};
 use crate::api::openapi::{OpenAPIConverter, validate_openapi, OpenAPIError};
-use crate::api::api::CacheError;
+use crate::service::api::CacheError;
 use golem_worker_service_base::gateway_api_definition::{ApiDefinitionId, ApiVersion};
-use golem_worker_service_base::gateway_api_definition::http::{MethodPattern, CompiledHttpApiDefinition};
+use golem_worker_service_base::gateway_api_definition::http::MethodPattern;
 use golem_worker_service_base::gateway_binding::gateway_binding_compiled::GatewayBindingCompiled;
 use golem_worker_service_base::service::gateway::api_definition::ApiDefinitionError;
+use golem_worker_service_base::service::gateway::auth::EmptyAuthCtx;
 use golem_service_base::auth::DefaultNamespace;
 use axum::{
     extract::{Path, State},
@@ -46,6 +47,7 @@ impl From<OpenAPIError> for ApiStatusCode {
             OpenAPIError::ValidationFailed(_) => StatusCode::INTERNAL_SERVER_ERROR,
             OpenAPIError::SchemaMismatch { .. } => StatusCode::BAD_REQUEST,
         };
+        error!("OpenAPI error: {}", err);
         ApiStatusCode(status)
     }
 }
@@ -96,7 +98,7 @@ pub async fn export_openapi(
     // Try to get from cache first
     let cache_key = format!("openapi:{}:{}", id, version);
     let cached_spec = services.cache.get(&cache_key).await
-        .map_err(|e| ApiStatusCode::from(e))?;
+        .map_err(|e| ApiStatusCode(StatusCode::INTERNAL_SERVER_ERROR))?;
     
     if let Some(spec) = cached_spec {
         return Ok(Json(spec));
@@ -106,10 +108,10 @@ pub async fn export_openapi(
     let api_def = services.definition_service.get(
         &ApiDefinitionId(id.clone()),
         &ApiVersion(version.clone()),
-        &DefaultNamespace::default(),
-        &DefaultNamespace::default(),
+        &EmptyAuthCtx,
+        &EmptyAuthCtx,
     ).await
-    .map_err(|e| ApiStatusCode::from(e))?
+    .map_err(Into::into)?
     .ok_or_else(|| ApiStatusCode(StatusCode::NOT_FOUND))?;
 
     // Convert CompiledHttpApiDefinition to ApiDefinition
@@ -118,11 +120,11 @@ pub async fn export_openapi(
 
     // Validate the spec
     validate_openapi(&spec.clone())
-        .map_err(|e| ApiStatusCode::from(e))?;
+        .map_err(Into::into)?;
 
     // Cache the valid spec
     services.cache.set(&cache_key, &spec).await
-        .map_err(|e| ApiStatusCode::from(e))?;
+        .map_err(|e| ApiStatusCode(StatusCode::INTERNAL_SERVER_ERROR))?;
 
     Ok(Json(spec))
 }

@@ -28,7 +28,6 @@ use golem_worker_service_base::gateway_execution::file_server_binding_handler::D
 use golem_worker_service_base::gateway_execution::file_server_binding_handler::FileServerBindingHandler;
 use worker_request_executor::UnauthorisedWorkerRequestExecutor;
 
-use crate::api::api::RedisCache;
 use golem_worker_service_base::gateway_api_definition::http::{
     CompiledHttpApiDefinition, HttpApiDefinition,
 };
@@ -54,7 +53,7 @@ use golem_api_grpc::proto::golem::workerexecutor::v1::worker_executor_client::Wo
 use golem_common::client::{GrpcClientConfig, MultiTargetGrpcClient};
 use golem_common::model::RetryConfig;
 
-use golem_common::config::{DbConfig, RedisConfig};
+use golem_common::config::{DbConfig};
 use golem_common::redis::RedisPool;
 use golem_service_base::db;
 use golem_worker_service_base::gateway_execution::gateway_session::{
