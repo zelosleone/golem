@@ -31,8 +31,12 @@ use std::str::{self, FromStr};
 use std::time::{Duration, SystemTime};
 use typed_path::Utf8UnixPathBuf;
 use url::Url;
+use uuid::uuid;
 use uuid::Uuid;
-use golem_wasm_ast::analysis::analysed_type as ast;
+use golem_api_grpc::proto::golem::worker::{PromiseId, ShardId};
+use golem_api_grpc::proto::golem::shardmanager::{Pod, RoutingTableEntry, RoutingTable};
+use golem_api_grpc::proto::golem::common::StringFilterComparator;
+use crate::model::{PromiseId, ShardId, Pod, RoutingTableEntry, RoutingTable, StringFilterComparator};
 
 pub mod api_types;
 pub mod component;
@@ -1571,7 +1575,7 @@ impl IntoValue for UriWrapper {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Encode, Decode)]
 pub struct ResourceKey<T>
 where
-    T: Clone + std::fmt::Debug + PartialEq + Eq + Hash + Serialize + Deserialize<'static>,
+    T: Clone + std::fmt::Debug + PartialEq + Eq + Hash + Serialize + Deserialize<'static> + Send + Sync,
 {
     pub component_id: ComponentId,
     pub key: T,
@@ -1579,7 +1583,7 @@ where
 
 impl<T> ResourceKey<T>
 where
-    T: Clone + std::fmt::Debug + PartialEq + Eq + Hash + Serialize + Deserialize<'static>,
+    T: Clone + std::fmt::Debug + PartialEq + Eq + Hash + Serialize + Deserialize<'static> + Send + Sync,
 {
     pub fn new(component_id: ComponentId, key: T) -> Self {
         Self { component_id, key }
@@ -1588,7 +1592,7 @@ where
 
 impl<T> Encode for ResourceKey<T>
 where
-    T: Clone + std::fmt::Debug + PartialEq + Eq + Hash + Serialize + Deserialize<'static> + Encode,
+    T: Clone + std::fmt::Debug + PartialEq + Eq + Hash + Serialize + Deserialize<'static> + Send + Sync + Encode,
 {
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         self.component_id.encode(encoder)?;
@@ -1598,7 +1602,7 @@ where
 
 impl<T> Decode for ResourceKey<T>
 where
-    T: Clone + std::fmt::Debug + PartialEq + Eq + Hash + Serialize + Deserialize<'static> + Decode,
+    T: Clone + std::fmt::Debug + PartialEq + Eq + Hash + Serialize + Deserialize<'static> + Send + Sync + Decode,
 {
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         let component_id = ComponentId::decode(decoder)?;
@@ -1609,7 +1613,7 @@ where
 
 impl<T> Display for ResourceKey<T>
 where
-    T: Clone + std::fmt::Debug + PartialEq + Eq + Hash + Serialize + Deserialize<'static> + Display,
+    T: Clone + std::fmt::Debug + PartialEq + Eq + Hash + Serialize + Deserialize<'static> + Send + Sync + Display,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}:{}", self.component_id, self.key)
@@ -1622,7 +1626,7 @@ where
 #[serde(rename_all = "camelCase")]
 pub struct AnalysedTypeWrapper<T> 
 where 
-    T: Clone + std::fmt::Debug + PartialEq + Serialize + Deserialize<'static>,
+    T: Clone + std::fmt::Debug + PartialEq + Serialize + Deserialize<'static> + Send + Sync,
 {
     #[serde(bound(deserialize = "T: Deserialize<'static>"))]
     pub inner: T,
@@ -1630,7 +1634,7 @@ where
 
 impl<T> Encode for AnalysedTypeWrapper<T>
 where
-    T: Clone + std::fmt::Debug + PartialEq + Serialize + Deserialize<'static> + Encode,
+    T: Clone + std::fmt::Debug + PartialEq + Serialize + Deserialize<'static> + Send + Sync + Encode,
 {
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         self.inner.encode(encoder)
@@ -1639,7 +1643,7 @@ where
 
 impl<T> Decode for AnalysedTypeWrapper<T>
 where
-    T: Clone + std::fmt::Debug + PartialEq + Serialize + Deserialize<'static> + Decode,
+    T: Clone + std::fmt::Debug + PartialEq + Serialize + Deserialize<'static> + Send + Sync + Decode,
 {
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         let inner = T::decode(decoder)?;
@@ -1763,5 +1767,25 @@ impl Decode for WorkerEventType {
                 allowed_variants: &[0, 1, 2],
             }),
         }
+    }
+}
+
+impl Type for IdempotencyKey {
+    type RawElementValueType = Self;
+    fn as_raw_value(&self) -> Option<&Self::RawElementValueType> {
+        Some(self)
+    }
+    fn raw_element_iter<'a>(&'a self) -> Box<dyn Iterator<Item = &'a Self::RawElementValueType> + 'a> {
+        Box::new(std::iter::once(self))
+    }
+}
+
+impl Type for WorkerId {
+    type RawElementValueType = Self;
+    fn as_raw_value(&self) -> Option<&Self::RawElementValueType> {
+        Some(self)
+    }
+    fn raw_element_iter<'a>(&'a self) -> Box<dyn Iterator<Item = &'a Self::RawElementValueType> + 'a> {
+        Box::new(std::iter::once(self))
     }
 }

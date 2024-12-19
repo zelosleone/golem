@@ -18,10 +18,11 @@ use crate::model::{
     ComponentFilePermissions, InitialComponentFile,
     ComponentFileSystemNode, ComponentFileSystemNodeDetails, GatewayBindingType,
     WorkerStatus, OplogIndex, ApiIdempotencyKey, NumberOfShards, TargetWorkerId,
-    InitialComponentFileKey
+    InitialComponentFileKey, PromiseId, ShardId, Pod, RoutingTableEntry, RoutingTable,
+    StringFilterComparator, ApiWorkerId
 };
 use golem_api_grpc::proto::golem::worker::{
-    WorkerFilter as GrpcWorkerFilter, FileSystemNode
+    WorkerFilter as GrpcWorkerFilter, FileSystemNode, PromiseId as GrpcPromiseId, ShardId as GrpcShardId
 };
 use golem_api_grpc::proto::golem::common::{
     FilterComparator as GrpcFilterComparator, 
@@ -36,6 +37,7 @@ use golem_api_grpc::proto::golem::shardmanager::{
 };
 use std::ops::Add;
 use std::time::{Duration, SystemTime};
+use crate::model::Type;
 
 impl From<Timestamp> for prost_types::Timestamp {
     fn from(value: Timestamp) -> Self {
@@ -103,8 +105,7 @@ impl From<TargetWorkerId> for golem_api_grpc::proto::golem::worker::TargetWorker
 impl From<PromiseId> for golem_api_grpc::proto::golem::worker::PromiseId {
     fn from(value: PromiseId) -> Self {
         Self {
-            worker_id: Some(value.worker_id.into()),
-            oplog_idx: value.oplog_idx.into(),
+            id: value.id,
         }
     }
 }
@@ -116,29 +117,31 @@ impl TryFrom<golem_api_grpc::proto::golem::worker::PromiseId> for PromiseId {
         value: golem_api_grpc::proto::golem::worker::PromiseId,
     ) -> Result<Self, Self::Error> {
         Ok(Self {
-            worker_id: value.worker_id.ok_or("Missing worker_id")?.try_into()?,
-            oplog_idx: OplogIndex::from_u64(value.oplog_idx),
+            id: value.id,
         })
     }
 }
 
 impl From<ShardId> for golem_api_grpc::proto::golem::shardmanager::ShardId {
-    fn from(value: ShardId) -> golem_api_grpc::proto::golem::shardmanager::ShardId {
-        golem_api_grpc::proto::golem::shardmanager::ShardId { value: value.value }
+    fn from(value: ShardId) -> Self {
+        Self {
+            id: value.id,
+        }
     }
 }
 
 impl From<golem_api_grpc::proto::golem::shardmanager::ShardId> for ShardId {
-    fn from(proto: golem_api_grpc::proto::golem::shardmanager::ShardId) -> Self {
-        Self { value: proto.value }
+    fn from(value: golem_api_grpc::proto::golem::shardmanager::ShardId) -> Self {
+        Self {
+            id: value.id,
+        }
     }
 }
 
 impl From<GrpcPod> for Pod {
     fn from(value: GrpcPod) -> Self {
         Self {
-            host: value.host,
-            port: value.port as u16,
+            id: value.id,
         }
     }
 }
@@ -146,8 +149,7 @@ impl From<GrpcPod> for Pod {
 impl From<GrpcRoutingTableEntry> for RoutingTableEntry {
     fn from(value: GrpcRoutingTableEntry) -> Self {
         Self {
-            shard_id: value.shard_id.unwrap().into(),
-            pod: value.pod.unwrap().into(),
+            id: value.id,
         }
     }
 }
@@ -155,15 +157,7 @@ impl From<GrpcRoutingTableEntry> for RoutingTableEntry {
 impl From<GrpcRoutingTable> for RoutingTable {
     fn from(value: GrpcRoutingTable) -> Self {
         Self {
-            number_of_shards: NumberOfShards {
-                value: value.number_of_shards as usize,
-            },
-            shard_assignments: value
-                .shard_assignments
-                .into_iter()
-                .map(RoutingTableEntry::from)
-                .map(|routing_table_entry| (routing_table_entry.shard_id, routing_table_entry.pod))
-                .collect(),
+            id: value.id,
         }
     }
 }
@@ -482,5 +476,25 @@ impl TryFrom<FileSystemNode> for ComponentFileSystemNode {
             }),
             None => Err(anyhow::anyhow!("Missing value")),
         }
+    }
+}
+
+impl Type for ApiIdempotencyKey {
+    type RawElementValueType = String;
+    fn as_raw_value(&self) -> Option<&Self::RawValueType> {
+        Some(&self.value)
+    }
+    fn raw_element_iter(&self) -> Box<dyn Iterator<Item = &Self::RawElementValueType>> {
+        Box::new(std::iter::once(&self.value))
+    }
+}
+
+impl Type for ApiWorkerId {
+    type RawElementValueType = String;
+    fn as_raw_value(&self) -> Option<&Self::RawValueType> {
+        Some(&self.0)
+    }
+    fn raw_element_iter(&self) -> Box<dyn Iterator<Item = &Self::RawElementValueType>> {
+        Box::new(std::iter::once(&self.0))
     }
 }
