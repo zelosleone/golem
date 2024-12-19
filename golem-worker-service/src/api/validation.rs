@@ -84,7 +84,8 @@ fn validate_wit_binding_types(
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+    use crate::api::definition::types::{Route, HttpMethod}; // Added import
+
     #[test]
     fn test_valid_api_definition() {
         let api = ApiDefinition {
@@ -102,6 +103,54 @@ mod tests {
                         input_type: "string".to_string(),
                         output_type: "string".to_string(),
                         function_name: "test".to_string(),
+                    },
+                },
+            ],
+        };
+        assert!(validate_api_definition(&api).is_ok());
+    }
+
+    #[test]
+    fn test_invalid_type_in_api_definition() {
+        let api = ApiDefinition {
+            id: "test".to_string(),
+            name: "test".to_string(),
+            version: "1.0".to_string(),
+            description: "Test API with invalid type".to_string(),
+            routes: vec![
+                Route {
+                    path: "/test".to_string(),
+                    method: HttpMethod::Get,
+                    description: "Test route".to_string(),
+                    template_name: "test".to_string(),
+                    binding: BindingType::Default {
+                        input_type: "unknown_type".to_string(),
+                        output_type: "string".to_string(),
+                        function_name: "test".to_string(),
+                    },
+                },
+            ],
+        };
+        assert!(validate_api_definition(&api).is_err());
+    }
+
+    #[test]
+    fn test_complex_api_definition() {
+        let api = ApiDefinition {
+            id: "complex".to_string(),
+            name: "Complex API".to_string(),
+            version: "2.0".to_string(),
+            description: "A more complex API".to_string(),
+            routes: vec![
+                Route {
+                    path: "/complex".to_string(),
+                    method: HttpMethod::Post,
+                    description: "Complex route".to_string(),
+                    template_name: "complex".to_string(),
+                    binding: BindingType::Default {
+                        input_type: "record{name:string,age:i32}".to_string(),
+                        output_type: "result<string, bool>".to_string(),
+                        function_name: "complex_function".to_string(),
                     },
                 },
             ],
