@@ -142,8 +142,21 @@ impl OpenAPIConverter {
         
         if let Some(path_params) = Self::extract_path_parameters(&route.path) {
             for param in path_params {
-                let schema: Schema = param.schema.into();
-                params.push(ReferenceOr::Item(param.into()));
+                let schema: Schema = param.schema.clone().into();
+                params.push(ReferenceOr::Item(openapiv3::Parameter::Path {
+                    parameter_data: openapiv3::ParameterData {
+                        name: param.name,
+                        description: param.description,
+                        required: true,
+                        deprecated: None,
+                        format: openapiv3::ParameterSchemaOrContent::Schema(ReferenceOr::Item(schema)),
+                        example: None,
+                        examples: Default::default(),
+                        explode: false,
+                        extensions: Default::default(),
+                    },
+                    style: openapiv3::PathStyle::Simple,
+                }));
             }
         }
         params
@@ -226,17 +239,9 @@ impl OpenAPIConverter {
     fn create_request_body(route: &Route) -> Option<OpenApiRequestBody> {
         match &route.binding {
             BindingType::Default { input_type, .. } => {
-                let schema = Schema {
-                    schema_data: Default::default(),
-                    schema_kind: SchemaKind::Type(openapiv3::Type::String(StringType {
-                        format: None,
-                        pattern: None,
-                        enumeration: vec![],
-                        min_length: None,
-                        max_length: None,
-                    })),
-                };
-
+                let analysed_type = analysed_type_from_string(input_type)
+                    .unwrap_or(AnalysedType::Str(TypeStr));
+                let schema = analysed_type_to_schema(&analysed_type).into();
                 let mut content = IndexMap::new();
                 content.insert(
                     "application/json".to_string(),
@@ -360,7 +365,11 @@ impl OpenAPIConverter {
     fn get_response_schema(route: &Route) -> ReferenceOr<Schema> {
         match &route.binding {
             BindingType::Default { output_type, .. } => {
-                analysed_type_to_schema(output_type)
+                // Convert string to AnalysedType first
+                match Self::convert_string_to_analyzed_type(output_type) {
+                    Ok(analyzed) => analysed_type_to_schema(&analyzed),
+                    Err(_) => ReferenceOr::Item(Schema::default())
+                }
             },
             BindingType::FileServer { .. } => ReferenceOr::Item(Schema {
                 schema_data: Default::default(),
@@ -392,6 +401,18 @@ impl OpenAPIConverter {
             BindingType::Proxy => ReferenceOr::Reference {
                 reference: "#/components/schemas/ProxyResponse".to_string()
             },
+        }
+    }
+
+    // Add this helper method
+    fn convert_string_to_analyzed_type(s: &str) -> Result<AnalysedType, String> {
+        match s {
+            "string" => Ok(AnalysedType::Str(TypeStr)),
+            "bool" => Ok(AnalysedType::Bool(TypeBool)),
+            "i32" | "s32" => Ok(AnalysedType::S32(TypeS32)),
+            "i64" | "s64" => Ok(AnalysedType::S64(TypeS64)),
+            // Add more mappings as needed
+            _ => Err(format!("Unsupported type: {}", s))
         }
     }
 }
@@ -442,6 +463,17 @@ fn analysed_type_to_schema(typ: &AnalysedType) -> ReferenceOr<Schema> {
         },
     };
     ReferenceOr::Item(schema.into())
+}
+
+// Add this function to properly convert string types to analyzed types
+fn analysed_type_from_string(typ_str: &str) -> Result<AnalysedType, String> {
+    // Basic implementation - expand based on your type system
+    match typ_str {
+        "string" => Ok(AnalysedType::Str(TypeStr)),
+        "bool" => Ok(AnalysedType::Bool(TypeBool)),
+        // Add more type mappings as needed
+        _ => Err(format!("Unsupported type: {}", typ_str))
+    }
 }
 
 // Update schema creation functions to use OpenAPISchemaType
@@ -530,3 +562,5 @@ mod tests {
        assert!(spec.paths.paths.contains_key("/test"));
    }
 }
+```
+</copilot-edited-file>

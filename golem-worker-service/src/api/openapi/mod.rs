@@ -10,6 +10,12 @@ pub use types::OpenAPISpec;
 // Re-export openapiv3::Schema for external use
 pub use openapiv3::Schema as OpenAPISchema;
 
+pub use openapiv3::{
+    Schema, SchemaKind, Type as OpenAPIType,
+    VariantOrUnknownOrEmpty, StringFormat, Parameter,
+    PathStyle, ParameterData,
+};
+
 use openapiv3::OpenAPI;
 use crate::api::definition::types::ApiDefinition;
 

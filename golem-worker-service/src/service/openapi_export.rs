@@ -82,9 +82,24 @@ fn convert_method(method: &MethodPattern) -> HttpMethod {
 
 fn convert_binding(binding: &GatewayBindingCompiled) -> BindingType {
     match binding {
-        GatewayBindingCompiled::Worker(_) => BindingType::Worker,
-        GatewayBindingCompiled::Static(_) => BindingType::Worker, // Changed to Worker since Static isn't available
-        GatewayBindingCompiled::FileServer(_) => BindingType::Worker,
+        GatewayBindingCompiled::Worker(worker) => {
+            BindingType::Worker {
+                input_type: worker.input_type.to_string(),
+                output_type: worker.output_type.to_string(),
+                function_name: worker.function_name.clone(),
+            }
+        }
+        GatewayBindingCompiled::Static(static_binding) => {
+            BindingType::Static {
+                content_type: static_binding.content_type.clone(),
+                content: static_binding.content.clone(),
+            }
+        }
+        GatewayBindingCompiled::FileServer(fs) => {
+            BindingType::FileServer {
+                root_dir: fs.root_dir.clone(),
+            }
+        }
     }
 }
 
@@ -93,6 +108,9 @@ pub async fn export_openapi(
     Path((id, version)): Path<(String, String)>,
 ) -> Result<Json<OpenAPI>, StatusCode> {
     info!("Requesting OpenAPI spec for API {}, version {}", id, version);
+
+    // Add namespace parameter
+    let namespace = "default";  // Or get from config
 
     // Try to get from cache first
     let cache_key = format!("openapi:{}:{}", id, version);
@@ -107,7 +125,7 @@ pub async fn export_openapi(
     let api_def = services.definition_service.get(
         &ApiDefinitionId(id.clone()),
         &ApiVersion(version.clone()),
-        &EmptyAuthCtx,
+        namespace,  // Add this
         &EmptyAuthCtx,
     ).await
     .map_err(Into::into)?
@@ -115,7 +133,7 @@ pub async fn export_openapi(
 
     // Convert CompiledHttpApiDefinition to ApiDefinition
     let converted_def = ApiDefinition::from(&api_def);
-    let spec = OpenAPIConverter::convert(&converted_def);
+    let spec = OpenAPIConverter::convert_to_spec(&converted_def);  // Not 'convert'
 
     // Validate the spec
     validate_openapi(&spec.clone())

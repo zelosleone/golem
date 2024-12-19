@@ -182,8 +182,8 @@ impl From<OpenAPISchemaType> for Schema {
     fn from(schema: OpenAPISchemaType) -> Self {
         let schema_kind = match schema {
             OpenAPISchemaType::String { format, enum_values } => {
-                SchemaKind::Type(openapiv3::Type::String(openapiv3::StringType {
-                    format: format.map(|f| f.into()),
+                SchemaKind::Type(OpenAPIType::String(openapiv3::StringType {
+                    format: format.map(Into::into).map(VariantOrUnknownOrEmpty::Known),
                     enumeration: enum_values.map(|v| v.into_iter().map(Some).collect()).unwrap_or_default(),
                     ..Default::default()
                 }))
@@ -248,6 +248,53 @@ impl From<Parameter> for openapiv3::Parameter {
             style: param.style
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(openapiv3::PathStyle::Simple),
+        }
+    }
+}
+
+// Add this to properly handle OpenAPI format strings
+impl From<String> for openapiv3::VariantOrUnknownOrEmpty<openapiv3::StringFormat> {
+    fn from(s: String) -> Self {
+        match s.as_str() {
+            "date-time" => Self::Known(openapiv3::StringFormat::DateTime),
+            "date" => Self::Known(openapiv3::StringFormat::Date),
+            "password" => Self::Known(openapiv3::StringFormat::Password),
+            "byte" => Self::Known(openapiv3::StringFormat::Byte),
+            "binary" => Self::Known(openapiv3::StringFormat::Binary),
+            _ => Self::Unknown(s)
+        }
+    }
+}
+
+// Add this implementation
+impl From<OpenAPISchemaType> for openapiv3::Schema {
+    fn from(schema: OpenAPISchemaType) -> Self {
+        let schema_data = Default::default();
+        let schema_kind = match schema {
+            OpenAPISchemaType::String { format, enum_values } => {
+                SchemaKind::Type(openapiv3::Type::String(openapiv3::StringType {
+                    format: format.map(|f| f.into()),
+                    enumeration: enum_values.map(|v| v.into_iter().map(Some).collect()).unwrap_or_default(),
+                    ..Default::default()
+                }))
+            },
+            // ...other cases from your existing implementation...
+        };
+        openapiv3::Schema {
+            schema_data,
+            schema_kind,
+        }
+    }
+}
+
+// Add this impl to fix parameter conversions
+impl From<&str> for openapiv3::PathStyle {
+    fn from(s: &str) -> Self {
+        match s {
+            "simple" => openapiv3::PathStyle::Simple,
+            "label" => openapiv3::PathStyle::Label,
+            "matrix" => openapiv3::PathStyle::Matrix,
+            _ => openapiv3::PathStyle::Simple,
         }
     }
 }

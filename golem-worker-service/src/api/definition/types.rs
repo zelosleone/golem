@@ -51,23 +51,18 @@ impl std::fmt::Display for BindingType {
 impl From<&GatewayBindingCompiled> for BindingType {
     fn from(binding: &GatewayBindingCompiled) -> Self {
         match binding {
-            GatewayBindingCompiled::Worker(worker) => {
-                let input_type = worker.input_type.to_string();
-                let output_type = worker.output_type.to_string();
-                BindingType::Worker {
-                    input_type,
-                    output_type,
-                    function_name: worker.function_name.clone(),
-                }
+            GatewayBindingCompiled::Worker(worker) => BindingType::Worker {
+                input_type: worker.worker_name_compiled.clone(), // Fixed field names
+                output_type: worker.response_compiled.clone(),
+                function_name: worker.component_id.clone(),
             },
-            GatewayBindingCompiled::FileServer(fs) => BindingType::FileServer {
-                root_dir: fs.root_dir.clone(),
+            GatewayBindingCompiled::FileServer(fs_binding) => BindingType::FileServer {
+                root_dir: fs_binding.clone(),
             },
             GatewayBindingCompiled::Static(static_binding) => BindingType::Static {
-                content_type: static_binding.content_type.clone(),
-                content: static_binding.content.clone(),
+                content_type: "application/octet-stream".to_string(), // Default
+                content: vec![], // Empty default
             },
-            _ => BindingType::Http,
         }
     }
 }

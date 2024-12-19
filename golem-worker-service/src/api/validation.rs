@@ -1,9 +1,6 @@
 use crate::api::definition::types::{ApiDefinition, BindingType};
 use golem_wasm_ast::analysis::AnalysedType;
 
-// Remove incorrect imports
-// use wasm_ast::analysis::model::{TypeI32, TypeI64, TypeF32, TypeF64, TypeUnit}; 
-
 #[derive(Debug, PartialEq)]
 enum TypeConstraint {
     Input,
@@ -13,6 +10,7 @@ enum TypeConstraint {
 pub fn validate_api_definition(api: &ApiDefinition) -> Result<(), String> {
     for route in &api.routes {
         if let BindingType::Default { input_type, output_type, .. } = &route.binding {
+            // Basic validation only - type conversion happens later
             if input_type.is_empty() || output_type.is_empty() {
                 return Err(format!("Empty type for path {}", route.path));
             }
@@ -85,6 +83,22 @@ fn are_types_compatible(input: &AnalysedType, output: &AnalysedType) -> bool {
         // Other combinations are incompatible
         _ => false
     }
+}
+
+// Update validate_wit_binding_types to handle string types
+fn validate_wit_binding_types(
+    input_type: &str,
+    output_type: &str,
+    path: &str,
+) -> Result<(), String> {
+    // Simple validation that types are not empty
+    if input_type.is_empty() {
+        return Err(format!("Empty input type for path {}", path));
+    }
+    if output_type.is_empty() {
+        return Err(format!("Empty output type for path {}", path));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
