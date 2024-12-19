@@ -1,6 +1,7 @@
 use super::types::{OpenAPISpec, PathItem, ParameterLocation};
 use std::collections::HashMap;
 use super::error::OpenAPIError;
+use openapiv3::{Schema as OpenAPISchema, Operation, ReferenceOr, SchemaKind};
 use crate::api::definition::patterns::{AllPathPatterns, PathPattern};
 use tracing::warn;
 

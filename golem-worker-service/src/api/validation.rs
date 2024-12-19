@@ -2,10 +2,11 @@ use crate::api::definition::types::{ApiDefinition, BindingType};
 use golem_wasm_ast::analysis::{
     AnalysedType, TypeStr, TypeF32, TypeF64, TypeBool, 
     TypeList, TypeOption, TypeRecord, TypeResult, NameTypePair,
-    TypeF32, TypeF64, 
 };
 
-#[derive(Debug)]
+use openapiv3::SchemaKind;
+
+#[derive(Debug, PartialEq)]
 enum TypeConstraint {
     Input,
     Output,

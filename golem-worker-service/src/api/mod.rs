@@ -22,7 +22,7 @@ pub use types::{
     FileServerOptions, SwaggerUIOptions
 };
 pub use definition::types::{ApiDefinition, Route, HttpMethod, BindingType};
-pub use openapi::{OpenAPIConverter, validate_openapi, OpenAPIError};
+pub use openapi::{OpenAPIConverter,  OpenAPIError, validate_openapi};
 
 // Define ApiServices type here
 pub type ApiServices = (
