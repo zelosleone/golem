@@ -1,8 +1,7 @@
 use crate::api::definition::types::{ApiDefinition, BindingType};
 use golem_wasm_ast::analysis::{
     AnalysedType, TypeStr, TypeF32, TypeF64, TypeBool, 
-    TypeList, TypeOption, TypeRecord, TypeResult, NameTypePair, TypeUnit,
-    TypeI32, TypeI64,
+    TypeList, TypeOption, TypeRecord, TypeResult, NameTypePair,
 };
 
 #[derive(Debug, PartialEq)]

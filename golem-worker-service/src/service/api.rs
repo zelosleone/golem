@@ -45,7 +45,7 @@ pub struct RedisCache {
 
 impl RedisCache {
     pub async fn new(redis_url: RedisConfig) -> Result<Self, CacheError> {
-        let client = Client::open(redis_url.url)?;
+        let client = Client::open(redis_url.url())?;
         Ok(RedisCache {
             redis_pool: Arc::new(client),
         })

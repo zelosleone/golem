@@ -5,8 +5,7 @@ use golem_worker_service_base::gateway_api_definition::{ApiDefinitionId, ApiVers
 use golem_worker_service_base::gateway_api_definition::http::MethodPattern;
 use golem_worker_service_base::gateway_binding::gateway_binding_compiled::GatewayBindingCompiled;
 use golem_worker_service_base::service::gateway::api_definition::ApiDefinitionError;
-use golem_worker_service_base::service::gateway::auth::EmptyAuthCtx;
-use golem_service_base::auth::DefaultNamespace;
+use golem_worker_service_base::service::auth::EmptyAuthCtx;
 use axum::{
     extract::{Path, State},
     Json,
