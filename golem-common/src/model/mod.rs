@@ -18,14 +18,13 @@ use bincode::{BorrowDecode, Decode, Encode};
 use bincode::de::{BorrowDecoder, Decoder};
 use bincode::enc::Encoder;
 use bincode::error::{DecodeError, EncodeError};
-use golem_wasm_ast::analysis::AnalysedType;
-use golem_wasm_ast::analysis::ast;
+use golem_wasm_ast::analysis::{AnalysedType, protobuf::ast};
 use golem_wasm_rpc::IntoValue;
-use golem_api_grpc::proto::golem::worker::{PromiseId as GrpcPromiseId};
-use golem_api_grpc::proto::golem::worker::RoutingTableEntry as GrpcRoutingTableEntry;
+use golem_api_grpc::proto::golem::worker::{PromiseId as GrpcPromiseId, IdempotencyKey};
+use golem_api_grpc::proto::golem::shardmanager::{ShardId as GrpcShardId, RoutingTableEntry as GrpcRoutingTableEntry};
 use golem_api_grpc::proto::golem::common::StringFilterComparator as GrpcStringFilterComparator;
-use golem_api_grpc::proto::golem::shardmanager::{ShardId as GrpcShardId};
 use http::Uri;
+use poem_openapi::types::Type;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde::de::{self, Unexpected, Visitor};
 use std::cmp::Ordering;
@@ -57,11 +56,14 @@ pub use regions::*;
 pub use snapshot::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct PromiseId(GrpcPromiseId);
+pub struct PromiseId {
+    pub worker_id: WorkerId,
+    pub oplog_idx: OplogIndex,
+}
 
 impl Display for PromiseId {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "PromiseId({})", self.0)
+        write!(f, "{}:{}", self.worker_id, self.oplog_idx)
     }
 }
 
@@ -376,96 +378,6 @@ impl Display for OwnedWorkerId {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Encode, Decode, Serialize, Deserialize)]
-#[cfg_attr(feature = "poem", derive(poem_openapi::Object))]
-#[cfg_attr(feature = "poem", oai(rename_all = "camelCase"))]
-#[serde(rename_all = "camelCase")]
-pub struct TargetWorkerId {
-    pub component_id: ComponentId,
-    pub worker_name: Option<String>,
-}
-
-impl TargetWorkerId {
-    pub fn uri(&self) -> String {
-        WorkerUrn { id: self.clone() }.to_string()
-    }
-
-    /// Converts a `TargetWorkerId` to a `WorkerId` if the worker name is specified
-    pub fn try_into_worker_id(self) -> Option<WorkerId> {
-        self.worker_name.map(|worker_name| WorkerId {
-            component_id: self.component_id,
-            worker_name,
-        })
-    }
-
-    /// Converts a `TargetWorkerId` to a `WorkerId`. If the worker name is not specified,
-    /// it generates a new unique one, and if the `force_in_shard` set is not empty, it guarantees
-    /// that the generated worker ID will belong to one of the provided shards.
-    ///
-    /// If the worker name was specified, `force_in_shard` is ignored.
-    pub fn into_worker_id(
-        self,
-        force_in_shard: &HashSet<ShardId>,
-        number_of_shards: usize,
-    ) -> WorkerId {
-        let TargetWorkerId {
-            component_id,
-            worker_name,
-        } = self;
-        match worker_name {
-            Some(worker_name) => WorkerId {
-                component_id,
-                worker_name,
-            },
-            None => {
-                if force_in_shard.is_empty() || number_of_shards == 0 {
-                    let worker_name = Uuid::new_v4().to_string();
-                    WorkerId {
-                        component_id,
-                        worker_name,
-                    }
-                } else {
-                    let mut current = Uuid::new_v4().to_u128_le();
-                    loop {
-                        let uuid = Uuid::from_u128_le(current);
-                        let worker_name = uuid.to_string();
-                        let worker_id = WorkerId {
-                            component_id: component_id.clone(),
-                            worker_name,
-                        };
-                        let shard_id = ShardId::from_worker_id(&worker_id, number_of_shards);
-                        if force_in_shard.contains(&shard_id) {
-                            return worker_id;
-                        }
-                        current += 1;
-                    }
-                }
-            }
-        }
-    }
-}
-
-impl Display for TargetWorkerId {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match &self.worker_name {
-            Some(worker_name) => write!(f, "{}/{}", self.component_id, worker_name),
-            None => write!(f, "{}/*", self.component_id),
-        }
-    }
-}
-
-impl From<WorkerId> for TargetWorkerId {
-    fn from(value: WorkerId) -> Self {
-        value.into_target_worker_id()
-    }
-}
-
-impl From<&WorkerId> for TargetWorkerId {
-    fn from(value: &WorkerId) -> Self {
-        value.clone().into_target_worker_id()
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Encode, Decode, Serialize, Deserialize)]
 pub struct PromiseId {
     pub worker_id: WorkerId,
@@ -474,7 +386,7 @@ pub struct PromiseId {
 
 impl Display for PromiseId {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}/{}", self.worker_id, self.oplog_idx)
+        write!(f, "{}:{}", self.worker_id, self.oplog_idx)
     }
 }
 
@@ -1466,9 +1378,6 @@ impl Default for ScanCursor {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "poem", derive(poem_openapi::Object))]
-#[cfg_attr(feature = "poem", oai(rename_all = "camelCase"))]
-#[serde(rename_all = "camelCase")]
 pub struct WorkerEvent {
     pub worker_id: Uuid,
     pub component_id: ComponentId,

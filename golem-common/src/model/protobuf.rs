@@ -17,11 +17,14 @@ use crate::model::{
     WorkerId, ComponentType, FilterComparator, LogLevel, 
     ComponentFilePermissions, InitialComponentFile,
     ComponentFileSystemNode, ComponentFileSystemNodeDetails, GatewayBindingType,
-    WorkerStatus, ApiIdempotencyKey, TargetWorkerId,
-    InitialComponentFileKey, PromiseId, StringFilterComparator, ApiWorkerId
+    WorkerStatus, TargetWorkerId, Pod, ShardId, RoutingTable, RoutingTableEntry,
+    InitialComponentFileKey, PromiseId, StringFilterComparator, ApiIdempotencyKey, ApiWorkerId
 };
 use golem_api_grpc::proto::golem::worker::{
-    WorkerFilter as GrpcWorkerFilter, FileSystemNode, PromiseId as GrpcPromiseId
+    WorkerFilter as GrpcWorkerFilter, FileSystemNode, IdempotencyKey as GrpcIdempotencyKey
+};
+use golem_api_grpc::proto::golem::shardmanager::{
+    Pod as GrpcPod, RoutingTable as GrpcRoutingTable, RoutingTableEntry as GrpcRoutingTableEntry, ShardId as GrpcShardId
 };
 use golem_api_grpc::proto::golem::common::{
     FilterComparator as GrpcFilterComparator, 
@@ -31,12 +34,9 @@ use golem_api_grpc::proto::golem::component::{
     ComponentFilePermissions as GrpcComponentFilePermissions,
     InitialComponentFile as GrpcInitialComponentFile
 };
-use golem_api_grpc::proto::golem::shardmanager::{
-    Pod as GrpcPod, RoutingTable as GrpcRoutingTable, RoutingTableEntry as GrpcRoutingTableEntry, ShardId as GrpcShardId
-};
 use std::ops::Add;
 use std::time::{Duration, SystemTime};
-use crate::model::Type;
+use poem_openapi::types::Type;
 
 impl From<Timestamp> for prost_types::Timestamp {
     fn from(value: Timestamp) -> Self {
@@ -145,18 +145,6 @@ impl From<GrpcPod> for Pod {
     }
 }
 
-impl From<GrpcRoutingTableEntry> for RoutingTableEntry {
-    fn from(value: GrpcRoutingTableEntry) -> Self {
-        Self {
-            // Assuming fields exist in both structs
-            id: value.id,
-            shard_id: value.shard_id.map(ShardId::from),
-            shard_count: value.shard_count,
-            filter: value.filter.map(StringFilterComparator::from),
-        }
-    }
-}
-
 impl From<GrpcRoutingTable> for RoutingTable {
     fn from(value: GrpcRoutingTable) -> Self {
         Self {
@@ -231,17 +219,6 @@ impl From<StringFilterComparator> for GrpcStringFilterComparator {
             StringFilterComparator::NotEqual => GrpcStringFilterComparator::StringNotEqual,
             StringFilterComparator::Like => GrpcStringFilterComparator::StringLike,
             StringFilterComparator::NotLike => GrpcStringFilterComparator::StringNotLike,
-        }
-    }
-}
-
-impl From<GrpcStringFilterComparator> for StringFilterComparator {
-    fn from(value: GrpcStringFilterComparator) -> Self {
-        match value {
-            GrpcStringFilterComparator::Equal => StringFilterComparator::Equal,
-            GrpcStringFilterComparator::NotEqual => StringFilterComparator::NotEqual,
-            GrpcStringFilterComparator::Like => StringFilterComparator::Like,
-            GrpcStringFilterComparator::NotLike => StringFilterComparator::NotLike,
         }
     }
 }

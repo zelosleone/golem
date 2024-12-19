@@ -55,6 +55,7 @@ impl From<ApiAccountId> for common::AccountId {
 impl Type for ApiIdempotencyKey {
     const IS_REQUIRED: bool = true;
     type RawValueType = Self;
+    type RawElementValueType = String;
 
     fn name() -> std::borrow::Cow<'static, str> {
         "IdempotencyKey".into()
@@ -62,6 +63,14 @@ impl Type for ApiIdempotencyKey {
 
     fn schema_ref() -> poem_openapi::registry::MetaSchemaRef {
         String::schema_ref()
+    }
+
+    fn as_raw_value(&self) -> Option<&Self::RawValueType> {
+        Some(self)
+    }
+
+    fn raw_element_iter(&self) -> Box<dyn Iterator<Item = &Self::RawElementValueType> + '_> {
+        Box::new(std::iter::once(&self.value))
     }
 }
 
@@ -92,6 +101,7 @@ impl ToJSON for ApiIdempotencyKey {
 impl Type for ApiWorkerId {
     const IS_REQUIRED: bool = true;
     type RawValueType = Self;
+    type RawElementValueType = String;
 
     fn name() -> std::borrow::Cow<'static, str> {
         "WorkerId".into()
@@ -99,6 +109,14 @@ impl Type for ApiWorkerId {
 
     fn schema_ref() -> poem_openapi::registry::MetaSchemaRef {
         String::schema_ref()
+    }
+
+    fn as_raw_value(&self) -> Option<&Self::RawValueType> {
+        Some(self)
+    }
+
+    fn raw_element_iter(&self) -> Box<dyn Iterator<Item = &Self::RawElementValueType> + '_> {
+        Box::new(std::iter::once(&self.value))
     }
 }
 
