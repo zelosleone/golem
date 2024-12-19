@@ -268,18 +268,21 @@ impl IntoValue for LogLevel {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Encode, Decode)]
+#[derive(Debug, Clone)]
+pub enum UpdateType {
+    Automatic { target_version: ComponentVersion },
+    Custom { target_version: ComponentVersion, snapshot: ComponentSnapshot },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Encode, Decode)]
 pub enum OplogEntry {
     CreateV1 {
         timestamp: Timestamp,
         worker_id: WorkerId,
-        component_version: ComponentVersion,
-        args: Vec<String>,
-        env: Vec<(String, String)>,
-        account_id: AccountId,
-        parent: Option<WorkerId>,
-        component_size: u64,
-        initial_total_linear_memory_size: u64,
+        worker_version: ComponentVersion,
+        template_version: ComponentVersion,
+        env: HashMap<String, String>,
+        name: Option<String>,
     },
     /// The worker invoked a host function (original 1.0 version)
     ImportedFunctionInvokedV1 {
@@ -827,10 +830,10 @@ mod protobuf {
     use crate::model::oplog::IndexedResourceKey;
 
     impl From<IndexedResourceKey> for golem_api_grpc::proto::golem::worker::IndexedResourceMetadata {
-        fn from(value: IndexedResourceKey) -> Self {
+        fn from(key: IndexedResourceKey) -> Self {
             golem_api_grpc::proto::golem::worker::IndexedResourceMetadata {
-                resource_name: value.resource_name,
-                resource_params: value.resource_params,
+                resource_name: key.resource_name,
+                resource_params: key.resource_params,
             }
         }
     }
@@ -842,5 +845,25 @@ mod protobuf {
                 resource_params: value.resource_params,
             }
         }
+    }
+}
+
+impl From<IndexedResourceKey> for golem_api_grpc::proto::golem::worker::IndexedResourceMetadata {
+    fn from(key: IndexedResourceKey) -> Self {
+        Self {
+            resource_id: key.resource_name.into(),
+            index: key.resource_params[0].into(),
+        }
+    }
+}
+
+impl TryFrom<golem_api_grpc::proto::golem::worker::IndexedResourceMetadata> for IndexedResourceKey {
+    type Error = anyhow::Error;
+    
+    fn try_from(value: golem_api_grpc::proto::golem::worker::IndexedResourceMetadata) -> Result<Self, Self::Error> {
+        Ok(Self {
+            resource_name: value.resource_id.try_into()?,
+            resource_params: vec![value.index.try_into()?],
+        })
     }
 }

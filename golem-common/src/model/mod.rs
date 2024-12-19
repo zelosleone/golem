@@ -15,50 +15,43 @@
 use crate::model::oplog::{
     IndexedResourceKey, OplogEntry, OplogIndex, TimestampedUpdateDescription, WorkerResourceId,
 };
-use crate::model::regions::DeletedRegions;
+use crate::model::api_types::ApiIdempotencyKey;
 use crate::newtype_uuid;
 use crate::uri::oss::urn::WorkerUrn;
-use bincode::de::read::Reader;
-use bincode::de::{BorrowDecoder, Decoder};
-use bincode::enc::write::Writer;
-use bincode::enc::Encoder;
-use bincode::error::{DecodeError, EncodeError};
 use bincode::{BorrowDecode, Decode, Encode};
-
-use golem_wasm_ast::analysis::analysed_type::{
-    field, list, r#enum, record, s64, str, tuple, u32, u64,
-};
-use golem_wasm_ast::analysis::{analysed_type, AnalysedType};
+use golem_wasm_ast::analysis::AnalysedType;
 use golem_wasm_rpc::{IntoValue, Value};
 use http::Uri;
 use rand::prelude::IteratorRandom;
-use serde::de::Unexpected;
-use serde::{Deserialize, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize};
+use serde::de::{self, Visitor, Unexpected};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::{Display, Formatter};
-use std::ops::Add;
 use std::str::FromStr;
 use std::time::{Duration, SystemTime};
-use typed_path::Utf8UnixPathBuf;
 use uuid::{uuid, Uuid};
 
+pub mod api_types;
 pub mod component;
 pub mod component_constraint;
 pub mod component_metadata;
-pub mod exports;
-pub mod lucene;
+pub mod component_version;
+pub mod error;
 pub mod oplog;
-pub mod plugin;
-pub mod public_oplog;
-pub mod regions;
-pub mod trim_date;
-
-#[cfg(feature = "poem")]
-mod poem;
-
-#[cfg(feature = "protobuf")]
+pub mod poem;
 pub mod protobuf;
+pub mod public_oplog;
+pub mod template_metadata;
+pub mod template_version;
+pub mod worker_metadata;
+pub mod worker_version;
+
+pub use api_types::*;
+pub use oplog::*;
+pub use poem::*;
+pub use protobuf::*;
+pub use public_oplog::*;
 
 #[cfg(feature = "poem")]
 pub trait PoemTypeRequirements:
@@ -1272,10 +1265,7 @@ impl From<FilterComparator> for i32 {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Encode, Decode, Default)]
-#[cfg_attr(feature = "poem", derive(poem_openapi::Object))]
-#[cfg_attr(feature = "poem", oai(rename_all = "camelCase"))]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct ScanCursor {
     pub cursor: u64,
     pub layer: usize,
@@ -1862,13 +1852,3 @@ impl Display for IdempotencyKey {
         write!(f, "{}", self.value)
     }
 }
-
-pub mod oplog;
-pub mod poem;
-pub mod protobuf;
-pub mod public_oplog;
-
-pub use oplog::*;
-pub use poem::*;
-pub use protobuf::*;
-pub use public_oplog::*;

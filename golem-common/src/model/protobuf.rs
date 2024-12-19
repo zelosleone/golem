@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::model::api_types::ApiIdempotencyKey;
 use crate::model::oplog::OplogIndex;
 use crate::model::{
     AccountId, ComponentFilePath, ComponentFilePermissions, ComponentFileSystemNode,
@@ -164,15 +165,17 @@ impl From<GrpcRoutingTable> for RoutingTable {
     }
 }
 
-impl From<golem_api_grpc::proto::golem::worker::IdempotencyKey> for IdempotencyKey {
-    fn from(proto: golem_api_grpc::proto::golem::worker::IdempotencyKey) -> Self {
-        Self { value: proto.value }
+impl TryFrom<golem_api_grpc::proto::golem::worker::IdempotencyKey> for ApiIdempotencyKey {
+    type Error = anyhow::Error;
+
+    fn try_from(value: golem_api_grpc::proto::golem::worker::IdempotencyKey) -> Result<Self, Self::Error> {
+        Ok(ApiIdempotencyKey(value))
     }
 }
 
-impl From<IdempotencyKey> for golem_api_grpc::proto::golem::worker::IdempotencyKey {
-    fn from(value: IdempotencyKey) -> Self {
-        Self { value: value.value }
+impl From<ApiIdempotencyKey> for golem_api_grpc::proto::golem::worker::IdempotencyKey {
+    fn from(value: ApiIdempotencyKey) -> Self {
+        value.0
     }
 }
 
