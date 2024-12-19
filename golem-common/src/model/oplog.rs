@@ -26,7 +26,7 @@ use golem_wasm_ast::analysis::analysed_type::{r#enum, u64};
 use golem_wasm_ast::analysis::AnalysedType;
 use golem_wasm_rpc::{IntoValue, Value};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
@@ -230,6 +230,32 @@ impl IntoValue for WorkerResourceId {
 pub struct IndexedResourceKey {
     pub resource_name: String,
     pub resource_params: Vec<String>,
+}
+
+#[cfg(feature = "protobuf")]
+mod protobuf {
+    use super::IndexedResourceKey;
+    use crate::model::oplog::IndexedResourceKey;
+
+    impl From<IndexedResourceKey> for golem_api_grpc::proto::golem::worker::IndexedResourceMetadata {
+        fn from(key: IndexedResourceKey) -> Self {
+            golem_api_grpc::proto::golem::worker::IndexedResourceMetadata {
+                resource_name: key.resource_name,
+                resource_params: key.resource_params,
+            }
+        }
+    }
+
+    impl TryFrom<golem_api_grpc::proto::golem::worker::IndexedResourceMetadata> for IndexedResourceKey {
+        type Error = anyhow::Error;
+        
+        fn try_from(value: golem_api_grpc::proto::golem::worker::IndexedResourceMetadata) -> Result<Self, Self::Error> {
+            Ok(Self {
+                resource_name: value.resource_id.try_into()?,
+                resource_params: vec![value.index.try_into()?],
+            })
+        }
+    }
 }
 
 /// Worker log levels including the special stdout and stderr channels
@@ -739,23 +765,19 @@ impl OplogEntry {
 }
 
 /// Describes a pending update
-#[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
+#[derive(Debug, Clone, PartialEq, Eq, Encode, Decode)]
 pub enum UpdateDescription {
-    /// Automatic update by replaying the oplog on the new version
-    Automatic { target_version: ComponentVersion }
-
+    /// Automatic update to a new version
+    Automatic { target_version: ComponentVersion },
     /// Custom update by loading a given snapshot on the new version
-    SnapshotBased {
-        target_version: ComponentVersion,
-        payload: OplogPayload,
-    },
+    Custom { target_version: ComponentVersion, snapshot: ComponentSnapshot },
 }
 
 impl UpdateDescription {
     pub fn target_version(&self) -> &ComponentVersion {
         match self {
             UpdateDescription::Automatic { target_version } => target_version,
-            UpdateDescription::SnapshotBased { target_version, .. } => target_version,
+            UpdateDescription::Custom { target_version, .. } => target_version,
         }
     }
 }
@@ -822,48 +844,5 @@ impl WorkerError {
             WorkerError::StackOverflow => format!("Stack overflow{error_logs}"),
             WorkerError::OutOfMemory => format!("Out of memory{error_logs}"),
         }
-    }
-}
-
-#[cfg(feature = "protobuf")]
-mod protobuf {
-    use crate::model::oplog::IndexedResourceKey;
-
-    impl From<IndexedResourceKey> for golem_api_grpc::proto::golem::worker::IndexedResourceMetadata {
-        fn from(key: IndexedResourceKey) -> Self {
-            golem_api_grpc::proto::golem::worker::IndexedResourceMetadata {
-                resource_name: key.resource_name,
-                resource_params: key.resource_params,
-            }
-        }
-    }
-
-    impl From<golem_api_grpc::proto::golem::worker::IndexedResourceMetadata> for IndexedResourceKey {
-        fn from(value: golem_api_grpc::proto::golem::worker::IndexedResourceMetadata) -> Self {
-            IndexedResourceKey {
-                resource_name: value.resource_name,
-                resource_params: value.resource_params,
-            }
-        }
-    }
-}
-
-impl From<IndexedResourceKey> for golem_api_grpc::proto::golem::worker::IndexedResourceMetadata {
-    fn from(key: IndexedResourceKey) -> Self {
-        Self {
-            resource_id: key.resource_name.into(),
-            index: key.resource_params[0].into(),
-        }
-    }
-}
-
-impl TryFrom<golem_api_grpc::proto::golem::worker::IndexedResourceMetadata> for IndexedResourceKey {
-    type Error = anyhow::Error;
-    
-    fn try_from(value: golem_api_grpc::proto::golem::worker::IndexedResourceMetadata) -> Result<Self, Self::Error> {
-        Ok(Self {
-            resource_name: value.resource_id.try_into()?,
-            resource_params: vec![value.index.try_into()?],
-        })
     }
 }

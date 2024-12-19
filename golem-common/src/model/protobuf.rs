@@ -19,15 +19,16 @@ use crate::model::{
     ComponentFileSystemNodeDetails, ComponentType, FilterComparator, GatewayBindingType,
     IdempotencyKey, InitialComponentFile, InitialComponentFileKey, LogLevel, NumberOfShards, Pod,
     PromiseId, RoutingTable, RoutingTableEntry, ScanCursor, ShardId, StringFilterComparator,
-    TargetWorkerId, Timestamp, WorkerCreatedAtFilter, WorkerEnvFilter, WorkerEvent, WorkerFilter,
-    WorkerId, WorkerNameFilter, WorkerNotFilter, WorkerStatus, WorkerStatusFilter,
-    WorkerVersionFilter,
+    TargetWorkerId, Timestamp, WorkerId, WorkerStatus,
 };
 use golem_api_grpc::proto::golem;
 use golem_api_grpc::proto::golem::shardmanager::{
     Pod as GrpcPod, RoutingTable as GrpcRoutingTable, RoutingTableEntry as GrpcRoutingTableEntry,
 };
-use golem_api_grpc::proto::golem::worker::Cursor;
+use golem_api_grpc::proto::golem::worker::{
+    Cursor, WorkerCreatedAtFilter, WorkerEnvFilter, WorkerEvent, WorkerFilter, WorkerNameFilter,
+    WorkerNotFilter, WorkerStatusFilter, WorkerVersionFilter,
+};
 use std::ops::Add;
 use std::time::{Duration, SystemTime};
 
@@ -166,10 +167,12 @@ impl From<GrpcRoutingTable> for RoutingTable {
 }
 
 impl TryFrom<golem_api_grpc::proto::golem::worker::IdempotencyKey> for ApiIdempotencyKey {
-    type Error = anyhow::Error;
+    type Error = String;
 
-    fn try_from(value: golem_api_grpc::proto::golem::worker::IdempotencyKey) -> Result<Self, Self::Error> {
-        Ok(ApiIdempotencyKey(value))
+    fn try_from(key: golem_api_grpc::proto::golem::worker::IdempotencyKey) -> Result<Self, Self::Error> {
+        Ok(Self {
+            value: key.value,
+        })
     }
 }
 
@@ -771,5 +774,15 @@ impl From<GatewayBindingType> for golem_api_grpc::proto::golem::apidefinition::G
                 golem_api_grpc::proto::golem::apidefinition::GatewayBindingType::AuthCallback
             }
         }
+    }
+}
+
+impl TryFrom<golem_api_grpc::proto::golem::worker::IndexedResourceMetadata> for IndexedResourceKey {
+    type Error = String;
+
+    fn try_from(metadata: golem_api_grpc::proto::golem::worker::IndexedResourceMetadata) -> Result<Self, Self::Error> {
+        Ok(Self {
+            value: metadata.value,
+        })
     }
 }

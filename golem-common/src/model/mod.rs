@@ -13,39 +13,39 @@
 // limitations under the License.
 
 use crate::model::oplog::{
-    IndexedResourceKey, OplogEntry, OplogIndex, TimestampedUpdateDescription, WorkerResourceId,
+    DeletedRegions, IndexedResourceKey, OplogEntry, OplogIndex, TimestampedUpdateDescription,
+    WorkerResourceId,
 };
 use crate::model::api_types::ApiIdempotencyKey;
 use crate::newtype_uuid;
 use crate::uri::oss::urn::WorkerUrn;
 use bincode::{BorrowDecode, Decode, Encode};
+use bincode::de::{BorrowDecoder, Decoder};
+use bincode::enc::Encoder;
+use bincode::error::{DecodeError, EncodeError};
 use golem_wasm_ast::analysis::AnalysedType;
+use golem_wasm_ast::analysis::analysed_type::{field, list, r#enum, record, s64, str as wasm_str, tuple, u32 as wasm_u32, u64 as wasm_u64};
 use golem_wasm_rpc::{IntoValue, Value};
 use http::Uri;
 use rand::prelude::IteratorRandom;
-use serde::{Deserialize, Deserializer, Serialize};
-use serde::de::{self, Visitor, Unexpected};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::{Display, Formatter};
 use std::str::FromStr;
 use std::time::{Duration, SystemTime};
+use typed_path::Utf8UnixPathBuf;
 use uuid::{uuid, Uuid};
 
 pub mod api_types;
 pub mod component;
-pub mod component_constraint;
 pub mod component_metadata;
-pub mod component_version;
-pub mod error;
 pub mod oplog;
 pub mod poem;
+pub mod plugin;
 pub mod protobuf;
 pub mod public_oplog;
-pub mod template_metadata;
-pub mod template_version;
-pub mod worker_metadata;
-pub mod worker_version;
+pub mod regions;
 
 pub use api_types::*;
 pub use oplog::*;
@@ -185,17 +185,14 @@ impl From<u64> for Timestamp {
 
 impl IntoValue for Timestamp {
     fn into_value(self) -> golem_wasm_rpc::Value {
-        let d = self
-            .0
-            .duration_since(iso8601_timestamp::Timestamp::UNIX_EPOCH);
         golem_wasm_rpc::Value::Record(vec![
-            golem_wasm_rpc::Value::U64(d.whole_seconds() as u64),
-            golem_wasm_rpc::Value::U32(d.subsec_nanoseconds() as u32),
+            ("seconds".to_string(), self.0.duration_since(Timestamp::UNIX_EPOCH).whole_seconds().into()),
+            ("nanoseconds".to_string(), self.0.duration_since(Timestamp::UNIX_EPOCH).subsec_nanoseconds().into()),
         ])
     }
 
     fn get_type() -> AnalysedType {
-        record(vec![field("seconds", u64()), field("nanoseconds", u32())])
+        record(vec![field("seconds", wasm_u64()), field("nanoseconds", wasm_u32())])
     }
 }
 
@@ -276,7 +273,7 @@ impl IntoValue for WorkerId {
 }
 
 /// Associates a worker-id with its owner account
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Encode, Decode)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct OwnedWorkerId {
     pub account_id: AccountId,
     pub worker_id: WorkerId,
@@ -714,11 +711,11 @@ impl IntoValue for WorkerMetadata {
     fn get_type() -> AnalysedType {
         record(vec![
             field("worker-id", WorkerId::get_type()),
-            field("args", list(str())),
-            field("env", list(tuple(vec![str(), str()]))),
+            field("args", list(wasm_str())),
+            field("env", list(tuple(vec![wasm_str(), wasm_str()]))),
             field("status", WorkerStatus::get_type()),
-            field("component-version", u64()),
-            field("retry-count", u64()),
+            field("component-version", wasm_u64()),
+            field("retry-count", wasm_u64()),
         ])
     }
 }
@@ -1100,7 +1097,7 @@ impl IntoValue for AccountId {
     }
 
     fn get_type() -> AnalysedType {
-        record(vec![field("value", str())])
+        record(vec![field("value", wasm_str())])
     }
 }
 
@@ -1261,220 +1258,6 @@ impl From<FilterComparator> for i32 {
             FilterComparator::LessEqual => 3,
             FilterComparator::Greater => 4,
             FilterComparator::GreaterEqual => 5,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct ScanCursor {
-    pub cursor: u64,
-    pub layer: usize,
-}
-
-impl ScanCursor {
-    pub fn is_active_layer_finished(&self) -> bool {
-        self.cursor == 0
-    }
-
-    pub fn is_finished(&self) -> bool {
-        self.cursor == 0 && self.layer == 0
-    }
-
-    pub fn into_option(self) -> Option<Self> {
-        if self.is_finished() {
-            None
-        } else {
-            Some(self)
-        }
-    }
-}
-
-impl Display for ScanCursor {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}/{}", self.layer, self.cursor)
-    }
-}
-
-impl FromStr for ScanCursor {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let parts = s.split('/').collect::<Vec<&str>>();
-        if parts.len() == 2 {
-            Ok(ScanCursor {
-                layer: parts[0]
-                    .parse()
-                    .map_err(|e| format!("Invalid layer part: {}", e))?,
-                cursor: parts[1]
-                    .parse()
-                    .map_err(|e| format!("Invalid cursor part: {}", e))?,
-            })
-        } else {
-            Err("Invalid cursor, must have 'layer/cursor' format".to_string())
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Encode, Decode, Serialize, Deserialize)]
-pub enum LogLevel {
-    Trace,
-    Debug,
-    Info,
-    Warn,
-    Error,
-    Critical,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum WorkerEvent {
-    StdOut {
-        timestamp: Timestamp,
-        bytes: Vec<u8>,
-    },
-    StdErr {
-        timestamp: Timestamp,
-        bytes: Vec<u8>,
-    },
-    Log {
-        timestamp: Timestamp,
-        level: LogLevel,
-        context: String,
-        message: String,
-    },
-    InvocationStart {
-        timestamp: Timestamp,
-        function: String,
-        idempotency_key: IdempotencyKey,
-    },
-    InvocationFinished {
-        timestamp: Timestamp,
-        function: String,
-        idempotency_key: IdempotencyKey,
-    },
-    Close,
-}
-
-impl WorkerEvent {
-    pub fn stdout(bytes: Vec<u8>) -> WorkerEvent {
-        WorkerEvent::StdOut {
-            timestamp: Timestamp::now_utc(),
-            bytes,
-        }
-    }
-
-    pub fn stderr(bytes: Vec<u8>) -> WorkerEvent {
-        WorkerEvent::StdErr {
-            timestamp: Timestamp::now_utc(),
-            bytes,
-        }
-    }
-
-    pub fn log(level: LogLevel, context: &str, message: &str) -> WorkerEvent {
-        WorkerEvent::Log {
-            timestamp: Timestamp::now_utc(),
-            level,
-            context: context.to_string(),
-            message: message.to_string(),
-        }
-    }
-
-    pub fn invocation_start(function: &str, idempotency_key: &IdempotencyKey) -> WorkerEvent {
-        WorkerEvent::InvocationStart {
-            timestamp: Timestamp::now_utc(),
-            function: function.to_string(),
-            idempotency_key: idempotency_key.clone(),
-        }
-    }
-
-    pub fn invocation_finished(function: &str, idempotency_key: &IdempotencyKey) -> WorkerEvent {
-        WorkerEvent::InvocationFinished {
-            timestamp: Timestamp::now_utc(),
-            function: function.to_string(),
-            idempotency_key: idempotency_key.clone(),
-        }
-    }
-
-    pub fn as_oplog_entry(&self) -> Option<OplogEntry> {
-        match self {
-            WorkerEvent::StdOut { timestamp, bytes } => Some(OplogEntry::Log {
-                timestamp: *timestamp,
-                level: oplog::LogLevel::Stdout,
-                context: String::new(),
-                message: String::from_utf8_lossy(bytes).to_string(),
-            }),
-            WorkerEvent::StdErr { timestamp, bytes } => Some(OplogEntry::Log {
-                timestamp: *timestamp,
-                level: oplog::LogLevel::Stderr,
-                context: String::new(),
-                message: String::from_utf8_lossy(bytes).to_string(),
-            }),
-            WorkerEvent::Log {
-                timestamp,
-                level,
-                context,
-                message,
-            } => Some(OplogEntry::Log {
-                timestamp: *timestamp,
-                level: match level {
-                    LogLevel::Trace => oplog::LogLevel::Trace,
-                    LogLevel::Debug => oplog::LogLevel::Debug,
-                    LogLevel::Info => oplog::LogLevel::Info,
-                    LogLevel::Warn => oplog::LogLevel::Warn,
-                    LogLevel::Error => oplog::LogLevel::Error,
-                    LogLevel::Critical => oplog::LogLevel::Critical,
-                },
-                context: context.clone(),
-                message: message.clone(),
-            }),
-            WorkerEvent::InvocationStart { .. } => None,
-            WorkerEvent::InvocationFinished { .. } => None,
-            WorkerEvent::Close => None,
-        }
-    }
-}
-
-impl Display for WorkerEvent {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            WorkerEvent::StdOut { bytes, .. } => {
-                write!(
-                    f,
-                    "<stdout> {}",
-                    String::from_utf8(bytes.clone()).unwrap_or_default()
-                )
-            }
-            WorkerEvent::StdErr { bytes, .. } => {
-                write!(
-                    f,
-                    "<stderr> {}",
-                    String::from_utf8(bytes.clone()).unwrap_or_default()
-                )
-            }
-            WorkerEvent::Log {
-                level,
-                context,
-                message,
-                ..
-            } => {
-                write!(f, "<log> {:?} {} {}", level, context, message)
-            }
-            WorkerEvent::InvocationStart {
-                function,
-                idempotency_key,
-                ..
-            } => {
-                write!(f, "<invocation-start> {} {}", function, idempotency_key)
-            }
-            WorkerEvent::InvocationFinished {
-                function,
-                idempotency_key,
-                ..
-            } => {
-                write!(f, "<invocation-finished> {} {}", function, idempotency_key)
-            }
-            WorkerEvent::Close => {
-                write!(f, "<close>")
-            }
         }
     }
 }
@@ -1843,7 +1626,7 @@ impl IntoValue for IdempotencyKey {
     }
 
     fn get_type() -> AnalysedType {
-        analysed_type::str()
+        analysed_type::wasm_str()
     }
 }
 
