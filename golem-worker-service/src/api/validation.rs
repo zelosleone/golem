@@ -22,13 +22,13 @@ pub fn validate_api_definition(api: &ApiDefinition) -> Result<(), String> {
 
 fn parse_type(type_str: &str) -> Result<AnalysedType, String> {
     match type_str {
-        "string" => Ok(AnalysedType::Primitive(TypePrimitive::STRING)),
-        "i32" => Ok(AnalysedType::Primitive(TypePrimitive::I_32)),
-        "i64" => Ok(AnalysedType::Primitive(TypePrimitive::I_64)),
+        "string" => Ok(AnalysedType::Str),
+        "i32" => Ok(AnalysedType::I32),
+        "i64" => Ok(AnalysedType::I64),
         "f32" => Ok(AnalysedType::F32(TypeF32)),
         "f64" => Ok(AnalysedType::F64(TypeF64)),
         "bool" => Ok(AnalysedType::Bool(TypeBool)),
-        "void" => Ok(AnalysedType::Unit),
+        "void" => Ok(AnalysedType::Empty),
         t if t.starts_with("list<") => {
             let inner_type = t.trim_start_matches("list<").trim_end_matches('>');
             let inner = parse_type(inner_type)?;
