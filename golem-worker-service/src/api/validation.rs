@@ -1,9 +1,9 @@
 use crate::api::definition::types::{ApiDefinition, BindingType};
 use golem_wasm_ast::analysis::{
     AnalysedType, TypeF32, TypeF64, TypeBool, TypeList, TypeOption, 
-    TypeRecord, TypeResult, NameTypePair
+    TypeRecord, TypeResult, NameTypePair, TypeStr, TypeI32, TypeI64,
+    TypeVoid
 };
-use golem_wasm_ast::analysis::protobuf::TypePrimitive;
 
 pub fn validate_api_definition(api: &ApiDefinition) -> Result<(), String> {
     for route in &api.routes {
@@ -22,13 +22,13 @@ pub fn validate_api_definition(api: &ApiDefinition) -> Result<(), String> {
 
 fn parse_type(type_str: &str) -> Result<AnalysedType, String> {
     match type_str {
-        "string" => Ok(AnalysedType::Str),
-        "i32" => Ok(AnalysedType::I32),
-        "i64" => Ok(AnalysedType::I64),
+        "string" => Ok(AnalysedType::Str(TypeStr)),
+        "i32" => Ok(AnalysedType::Int32(TypeI32)),
+        "i64" => Ok(AnalysedType::Int64(TypeI64)),
         "f32" => Ok(AnalysedType::F32(TypeF32)),
         "f64" => Ok(AnalysedType::F64(TypeF64)),
         "bool" => Ok(AnalysedType::Bool(TypeBool)),
-        "void" => Ok(AnalysedType::Empty),
+        "void" => Ok(AnalysedType::Void(TypeVoid)),
         t if t.starts_with("list<") => {
             let inner_type = t.trim_start_matches("list<").trim_end_matches('>');
             let inner = parse_type(inner_type)?;
