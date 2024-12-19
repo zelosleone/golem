@@ -18,7 +18,7 @@ use golem_api_grpc::proto::golem::component;
 use golem_api_grpc::proto::golem::worker;
 
 use crate::model::{
-    AccountId, ComponentId, PluginInstallationId, PromiseId, TargetWorkerId,
+    AccountId, ComponentId, PluginInstallationId, PromiseId, TargetWorkerId, WorkerId,
 };
 
 use golem_api_grpc::proto::golem::worker::IdempotencyKey;

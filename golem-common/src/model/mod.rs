@@ -12,46 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::model::oplog::{
-    DeletedRegions, IndexedResourceKey, OplogEntry, OplogIndex, TimestampedUpdateDescription,
-    WorkerResourceId,
-};
-use crate::model::api_types::ApiIdempotencyKey;
-use crate::newtype_uuid;
-use crate::uri::oss::urn::WorkerUrn;
-use bincode::{BorrowDecode, Decode, Encode};
-use bincode::de::{BorrowDecoder, Decoder};
-use bincode::enc::Encoder;
-use bincode::error::{DecodeError, EncodeError};
-use golem_wasm_ast::analysis::AnalysedType;
-use golem_wasm_ast::analysis::analysed_type::{field, list, r#enum, record, s64, str as wasm_str, tuple, u32 as wasm_u32, u64 as wasm_u64};
-use golem_wasm_rpc::{IntoValue, Value};
-use http::Uri;
-use rand::prelude::IteratorRandom;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet, VecDeque};
+use crate::model::oplog::{DeletedRegions, OplogEntry, OplogIndex, TimestampedUpdateDescription};
+use crate::model::regions::*;
+use bincode::{Decode, Encode};
+use golem_wasm_ast::AnalysedType;
+use golem_wasm_ast::analysis::analysed_type as ast;
+use serde::{Deserialize, Serialize};
+use serde::de::{self, Unexpected, Visitor};
+use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
-use std::str::FromStr;
 use std::time::{Duration, SystemTime};
-use typed_path::Utf8UnixPathBuf;
 use uuid::{uuid, Uuid};
 
 pub mod api_types;
-pub mod component;
-pub mod component_metadata;
 pub mod oplog;
-pub mod poem;
-pub mod plugin;
-pub mod protobuf;
-pub mod public_oplog;
 pub mod regions;
+pub mod snapshot;
 
 pub use api_types::*;
 pub use oplog::*;
-pub use poem::*;
-pub use protobuf::*;
-pub use public_oplog::*;
+pub use regions::*;
+pub use snapshot::*;
 
 #[cfg(feature = "poem")]
 pub trait PoemTypeRequirements:
@@ -192,7 +173,7 @@ impl IntoValue for Timestamp {
     }
 
     fn get_type() -> AnalysedType {
-        record(vec![field("seconds", wasm_u64()), field("nanoseconds", wasm_u32())])
+        ast::record(vec![ast::field("seconds", ast::wasm_u64()), ast::field("nanoseconds", ast::wasm_u32())])
     }
 }
 
@@ -265,9 +246,9 @@ impl IntoValue for WorkerId {
     }
 
     fn get_type() -> AnalysedType {
-        record(vec![
-            field("component_id", ComponentId::get_type()),
-            field("worker_name", std::string::String::get_type()),
+        ast::record(vec![
+            ast::field("component_id", ComponentId::get_type()),
+            ast::field("worker_name", std::string::String::get_type()),
         ])
     }
 }
@@ -430,9 +411,9 @@ impl IntoValue for PromiseId {
     }
 
     fn get_type() -> AnalysedType {
-        record(vec![
-            field("worker_id", WorkerId::get_type()),
-            field("oplog_idx", OplogIndex::get_type()),
+        ast::record(vec![
+            ast::field("worker_id", WorkerId::get_type()),
+            ast::field("oplog_idx", OplogIndex::get_type()),
         ])
     }
 }
@@ -556,7 +537,7 @@ impl IntoValue for ShardId {
     }
 
     fn get_type() -> AnalysedType {
-        s64()
+        ast::s64()
     }
 }
 
@@ -709,13 +690,13 @@ impl IntoValue for WorkerMetadata {
     }
 
     fn get_type() -> AnalysedType {
-        record(vec![
-            field("worker-id", WorkerId::get_type()),
-            field("args", list(wasm_str())),
-            field("env", list(tuple(vec![wasm_str(), wasm_str()]))),
-            field("status", WorkerStatus::get_type()),
-            field("component-version", wasm_u64()),
-            field("retry-count", wasm_u64()),
+        ast::record(vec![
+            ast::field("worker-id", WorkerId::get_type()),
+            ast::field("args", ast::list(ast::wasm_str())),
+            ast::field("env", ast::list(ast::tuple(vec![ast::wasm_str(), ast::wasm_str()]))),
+            ast::field("status", WorkerStatus::get_type()),
+            ast::field("component-version", ast::wasm_u64()),
+            ast::field("retry-count", ast::wasm_u64()),
         ])
     }
 }
@@ -994,7 +975,7 @@ impl IntoValue for WorkerStatus {
     }
 
     fn get_type() -> AnalysedType {
-        r#enum(&[
+        ast::r#enum(&[
             "running",
             "idle",
             "suspended",
@@ -1097,7 +1078,7 @@ impl IntoValue for AccountId {
     }
 
     fn get_type() -> AnalysedType {
-        record(vec![field("value", wasm_str())])
+        ast::record(vec![ast::field("value", ast::wasm_str())])
     }
 }
 
@@ -1419,7 +1400,6 @@ pub enum GatewayBindingType {
     SwaggerUi,
 }
 
-// To keep backward compatibility as we documented wit-worker to be default
 impl<'de> Deserialize<'de> for GatewayBindingType {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -1427,11 +1407,11 @@ impl<'de> Deserialize<'de> for GatewayBindingType {
     {
         struct GatewayBindingTypeVisitor;
 
-        impl de::Visitor<'_> for GatewayBindingTypeVisitor {
+        impl<'de> Visitor<'de> for GatewayBindingTypeVisitor {
             type Value = GatewayBindingType;
 
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                formatter.write_str("a string representing the binding type")
+                formatter.write_str("a string containing a gateway binding type")
             }
 
             fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
@@ -1439,12 +1419,13 @@ impl<'de> Deserialize<'de> for GatewayBindingType {
                 E: de::Error,
             {
                 match value {
-                    "default" | "wit-worker" => Ok(GatewayBindingType::Default),
-                    "file-server" => Ok(GatewayBindingType::FileServer),
-                    "cors-preflight" => Ok(GatewayBindingType::CorsPreflight),
-                    "auth-callback" => Ok(GatewayBindingType::AuthCallback),
-                    "swagger-ui" => Ok(GatewayBindingType::SwaggerUi),
-                    _ => Err(de::Error::invalid_value(Unexpected::Str(value), &self)),
+                    "http" => Ok(GatewayBindingType::Http),
+                    "https" => Ok(GatewayBindingType::Https),
+                    "grpc" => Ok(GatewayBindingType::Grpc),
+                    other => Err(E::invalid_value(
+                        Unexpected::Str(other),
+                        &"one of: 'http', 'https', 'grpc'",
+                    )),
                 }
             }
         }
@@ -1626,12 +1607,22 @@ impl IntoValue for IdempotencyKey {
     }
 
     fn get_type() -> AnalysedType {
-        analysed_type::wasm_str()
+        ast::wasm_str()
     }
 }
 
 impl Display for IdempotencyKey {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.value)
+    }
+}
+
+impl IntoValue for Uri {
+    fn into_value(self) -> golem_wasm_rpc::Value {
+        golem_wasm_rpc::Value::String(self.to_string())
+    }
+
+    fn get_type() -> AnalysedType {
+        ast::wasm_str()
     }
 }

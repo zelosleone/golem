@@ -15,6 +15,7 @@
 use crate::model::regions::OplogRegion;
 use crate::model::RetryConfig;
 use crate::model::{AccountId, ComponentVersion, PluginInstallationId, Timestamp, WorkerId, WorkerInvocation,};
+use crate::model::snapshot::{ComponentSnapshot,};
 use golem_api_grpc::proto::golem::worker::IdempotencyKey;
 use bincode::de::read::Reader;
 use bincode::de::{BorrowDecoder, Decoder};
@@ -235,21 +236,21 @@ pub struct IndexedResourceKey {
 #[cfg(feature = "protobuf")]
 mod protobuf {
     use super::IndexedResourceKey;
-    use crate::model::oplog::IndexedResourceKey;
+    use golem_api_grpc::proto::golem::worker::IndexedResourceMetadata;
 
-    impl From<IndexedResourceKey> for golem_api_grpc::proto::golem::worker::IndexedResourceMetadata {
+    impl From<IndexedResourceKey> for IndexedResourceMetadata {
         fn from(key: IndexedResourceKey) -> Self {
-            golem_api_grpc::proto::golem::worker::IndexedResourceMetadata {
+            IndexedResourceMetadata {
                 resource_name: key.resource_name,
                 resource_params: key.resource_params,
             }
         }
     }
 
-    impl TryFrom<golem_api_grpc::proto::golem::worker::IndexedResourceMetadata> for IndexedResourceKey {
+    impl TryFrom<IndexedResourceMetadata> for IndexedResourceKey {
         type Error = anyhow::Error;
         
-        fn try_from(value: golem_api_grpc::proto::golem::worker::IndexedResourceMetadata) -> Result<Self, Self::Error> {
+        fn try_from(value: IndexedResourceMetadata) -> Result<Self, Self::Error> {
             Ok(Self {
                 resource_name: value.resource_id.try_into()?,
                 resource_params: vec![value.index.try_into()?],
