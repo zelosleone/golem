@@ -3,7 +3,10 @@ use crate::api::openapi::{OpenAPIConverter, OpenAPISpec, validate_openapi, OpenA
 use golem_service_base::auth::{EmptyAuthCtx, DefaultNamespace};
 use golem_worker_service_base::gateway_api_definition::{ApiDefinitionId, ApiVersion};
 use golem_worker_service_base::gateway_api_definition::http::MethodPattern;
-use golem_worker_service_base::gateway_binding::gateway_binding_compiled::GatewayBindingCompiled;
+use golem_worker_service_base::gateway_binding::gateway_binding_compiled::{
+    GatewayBindingCompiled, WorkerBinding, FileServerBinding, SwaggerUIBinding, StaticBinding
+};
+use golem_wasm_ast::analysis::{AnalysedType, TypeInference};
 use axum::{
     extract::{Path, State},
     Json,
@@ -55,12 +58,47 @@ fn convert_method(method: &MethodPattern) -> HttpMethod {
 
 fn convert_binding(binding: &GatewayBindingCompiled) -> BindingType {
     match binding {
-        GatewayBindingCompiled::Worker(_) => BindingType::Worker,
-        // Removed Http and Proxy as they are not supported
-        // Provide a default case to handle unexpected variants
+        GatewayBindingCompiled::Worker(worker) => {
+            // Extract type information from Rib script
+            let (input_type, output_type) = match &worker.rib_script {
+                Some(script) => {
+                    let rib_types = script.infer_types();
+                    (rib_types.input_type, rib_types.output_type)
+                },
+                None => (AnalysedType::Any, AnalysedType::Any),
+            };
+
+            BindingType::Default {
+                input_type,
+                output_type,
+                options: None,
+            }
+        },
+        GatewayBindingCompiled::FileServer(fs) => {
+            BindingType::FileServer {
+                root_dir: fs.root_dir.clone(),
+                options: None,
+            }
+        },
+        GatewayBindingCompiled::SwaggerUI(swagger) => {
+            BindingType::SwaggerUI {
+                spec_path: swagger.spec_path.clone(),
+                options: None,
+            }
+        },
+        GatewayBindingCompiled::Static(static_binding) => {
+            BindingType::Static {
+                content_type: static_binding.content_type.clone(),
+                content: static_binding.content.clone(),
+            }
+        },
         _ => {
             error!("Unsupported binding type encountered: {:?}", binding);
-            BindingType::Worker // Defaulting to Worker; adjust as needed
+            // Default to a safe fallback
+            BindingType::Static {
+                content_type: "application/json".to_string(),
+                content: Vec::new(),
+            }
         }
     }
 }
@@ -149,4 +187,69 @@ pub async fn export_openapi(
 
     info!("Successfully generated and cached OpenAPI spec for {}", id);
     Ok(Json(spec))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use golem_wasm_ast::analysis::{TypeStr, TypeBool};
+
+    #[test]
+    fn test_convert_worker_binding() {
+        let rib_script = r#"
+            fn handle_request(input: string) -> bool {
+                input.length() > 0
+            }
+        "#;
+
+        let worker_binding = WorkerBinding {
+            rib_script: Some(rib_script.to_string()),
+            function_name: "handle_request".to_string(),
+            options: None,
+        };
+
+        let binding = convert_binding(&GatewayBindingCompiled::Worker(worker_binding));
+        
+        match binding {
+            BindingType::Default { input_type, output_type, .. } => {
+                assert!(matches!(input_type, AnalysedType::Str(TypeStr)));
+                assert!(matches!(output_type, AnalysedType::Bool(TypeBool)));
+            },
+            _ => panic!("Expected Default binding type"),
+        }
+    }
+
+    #[test]
+    fn test_convert_file_server_binding() {
+        let fs_binding = FileServerBinding {
+            root_dir: "/test".to_string(),
+            options: None,
+        };
+
+        let binding = convert_binding(&GatewayBindingCompiled::FileServer(fs_binding));
+        
+        match binding {
+            BindingType::FileServer { root_dir, .. } => {
+                assert_eq!(root_dir, "/test");
+            },
+            _ => panic!("Expected FileServer binding type"),
+        }
+    }
+
+    #[test]
+    fn test_convert_swagger_ui_binding() {
+        let swagger_binding = SwaggerUIBinding {
+            spec_path: "/api/spec".to_string(),
+            options: None,
+        };
+
+        let binding = convert_binding(&GatewayBindingCompiled::SwaggerUI(swagger_binding));
+        
+        match binding {
+            BindingType::SwaggerUI { spec_path, .. } => {
+                assert_eq!(spec_path, "/api/spec");
+            },
+            _ => panic!("Expected SwaggerUI binding type"),
+        }
+    }
 }
