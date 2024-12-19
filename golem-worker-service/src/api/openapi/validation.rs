@@ -1,8 +1,8 @@
-use super::types::{OpenAPISpec, Schema, PathItem, ParameterLocation};
+use super::types::{OpenAPISpec, PathItem, ParameterLocation};
 use std::collections::HashMap;
 use super::error::OpenAPIError;
 use crate::api::definition::patterns::{AllPathPatterns, PathPattern};
-use openapiv3::{Schema, Operation};
+use openapiv3::{Schema as OpenAPISchema, Operation, ReferenceOr, SchemaKind};
 use tracing::warn;
 
 pub fn validate_openapi(spec: &OpenAPISpec) -> Result<(), String> {
@@ -64,31 +64,59 @@ fn validate_path_parameter(path: &str, p: &super::types::Parameter) -> Result<()
 }
 
 
-fn validate_schemas(schemas: &Option<HashMap<String, Schema>>) -> Result<(), String> {
+fn validate_schemas(schemas: &Option<HashMap<String, OpenAPISchema>>) -> Result<(), String> {
     if let Some(schemas) = schemas {
-        for (key, schema) in schemas.iter() {
-             validate_schema(key, schema)?;
+        for (name, schema) in schemas {
+            validate_schema(name, schema)?;
         }
     }
-      Ok(())
+    Ok(())
 }
 
-fn validate_schema(key: &String, schema: &Schema) -> Result<(), String> {
-    match schema {
-        Schema::Object { properties, .. } => {
-            for (key, schema) in properties {
-               validate_schema(key, schema)?;
-            }
-        }
-         Schema::Array { items } => {
-              validate_schema(&"array_item".to_string(), &items)?;
-        }
-          Schema::Ref { reference } => {
-              validate_schema_ref(key, reference)?;
-        }
-        _ => {}
+fn validate_schema(name: &str, schema: &OpenAPISchema) -> Result<(), String> {
+    match &schema.schema_kind {
+        SchemaKind::Type(type_) => {
+            // Validate schema type
+            validate_type(type_)
+        },
+        SchemaKind::OneOf { .. } |
+        SchemaKind::AnyOf { .. } |
+        SchemaKind::AllOf { .. } => {
+            warn!("Schema {} uses unsupported composition", name);
+            Err(format!("Schema {} uses unsupported composition types", name))
+        },
+        SchemaKind::Not { .. } => {
+            warn!("Schema {} uses unsupported 'not' type", name);
+            Err(format!("Schema {} uses unsupported 'not' type", name))
+        },
+        _ => Ok(())
     }
-      Ok(())
+}
+
+fn validate_type(type_: &openapiv3::Type) -> Result<(), String> {
+    match type_ {
+        openapiv3::Type::String(_) |
+        openapiv3::Type::Number(_) |
+        openapiv3::Type::Integer(_) |
+        openapiv3::Type::Boolean { .. } => Ok(()),
+        openapiv3::Type::Array(array) => {
+            // Validate array items
+            if let ReferenceOr::Item(schema) = &array.items {
+                validate_schema("array_items", schema)
+            } else {
+                Ok(())
+            }
+        },
+        openapiv3::Type::Object(obj) => {
+            // Validate object properties
+            for (name, property) in &obj.properties {
+                if let ReferenceOr::Item(schema) = property {
+                    validate_schema(name, schema)?;
+                }
+            }
+            Ok(())
+        }
+    }
 }
 
 fn validate_schema_ref(_key: &String, reference: &String) -> Result<(), String> {
@@ -133,51 +161,76 @@ pub(crate) fn validate_path_pattern(path: &str) -> Result<(), OpenAPIError> {
 }
 
 fn validate_parameter_name(name: &str) -> bool {
-    !name.is_empty() && 
-    name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') &&
-    !name.starts_with('_') &&
-    !name.ends_with('_')
+    !name.is_empty() 
+    && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+    && !name.starts_with('_')
+    && !name.ends_with('_')
 }
 
 fn validate_catch_all_name(name: &str) -> bool {
     validate_parameter_name(name) && !name.contains("__")
 }
 
-pub(crate) fn validate_operation(operation: &Operation) -> Result<(), OpenAPIError> {
+pub(crate) fn validate_operation_types(operation: &Operation) -> Result<(), OpenAPIError> {
     // Must have at least one response
-    if operation.responses.is_empty() {
-        return Err(OpenAPIError::ValidationFailed("Operation must have at least one response".into()));
+    if operation.responses.responses.is_empty() {
+        return Err(OpenAPIError::ValidationFailed(
+            "Operation must have at least one response".into()
+        ));
     }
 
     // Validate parameters
-    if let Some(params) = &operation.parameters {
-        for param in params {
-            if let openapiv3::ReferenceOr::Item(param) = param {
-                validate_parameter_schema(&param.parameter_data.format)?;
-            }
+    for param in &operation.parameters {
+        if let ReferenceOr::Item(param) = param {
+            validate_parameter_schema(&param.parameter_data.format)?;
         }
     }
 
     Ok(())
 }
 
-fn validate_parameter_schema(schema: &Schema) -> Result<(), OpenAPIError> {
+fn validate_parameter_schema(schema: &OpenAPISchema) -> Result<(), OpenAPIError> {
     match schema {
-        Schema::Type(t) => {
+fn validate_parameter_schema(schema: &OpenAPISchema) -> Result<(), OpenAPIError> {
+    match &schema.schema_kind {
+        SchemaKind::Type(t) => {
             match t {
                 openapiv3::Type::String(_) |
                 openapiv3::Type::Number(_) |
                 openapiv3::Type::Integer(_) |
-                openapiv3::Type::Boolean {} => Ok(()),
+                openapiv3::Type::Boolean { .. } => Ok(()),
                 _ => {
                     warn!("Unsupported parameter schema type");
-                    Err(OpenAPIError::ValidationFailed("Unsupported parameter schema type".into()))
+                    Err(OpenAPIError::ValidationFailed(
+                        "Unsupported parameter schema type".into()
+                    ))
                 }
             }
         },
         _ => {
             warn!("Only simple types are supported for parameters");
-            Err(OpenAPIError::ValidationFailed("Only simple types are supported for parameters".into()))
+            Err(OpenAPIError::ValidationFailed(
+                "Only simple types are supported for parameters".into()
+            ))
         }
+    }
+}
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parameter_name_validation() {
+        assert!(validate_parameter_name("user_id"));
+        assert!(validate_parameter_name("count123"));
+        assert!(!validate_parameter_name("_hidden"));
+        assert!(!validate_parameter_name("invalid-name"));
+        assert!(!validate_parameter_name(""));
+    }
+
+    #[test]
+    fn test_catch_all_validation() {
+        assert!(validate_catch_all_name("all_files"));
+        assert!(!validate_catch_all_name("bad__name"));
+        assert!(!validate_catch_all_name("_invalid"));
     }
 }

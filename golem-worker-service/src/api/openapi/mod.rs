@@ -1,11 +1,14 @@
-mod types;
 mod converter;
 mod error;
 mod validation;
+mod types;
 
-pub use types::*;
 pub use converter::OpenAPIConverter;
 pub use error::{OpenAPIError, validate_openapi};
+pub use types::OpenAPISpec;
+
+// Re-export openapiv3::Schema for external use
+pub use openapiv3::Schema as OpenAPISchema;
 
 use openapiv3::OpenAPI;
 use crate::api::definition::types::ApiDefinition;

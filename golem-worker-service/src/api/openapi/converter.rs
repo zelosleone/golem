@@ -7,7 +7,7 @@ use heck::ToSnakeCase;
 pub struct OpenAPIConverter;
 
 impl OpenAPIConverter {
-    pub fn convert(api: &ApiDefinition) -> OpenAPISpec {
+    pub fn convert_to_spec(api: &ApiDefinition) -> OpenAPISpec {
         let converter = OpenAPIConverter;
         OpenAPISpec {
             openapi: "3.0.0".to_string(),
@@ -22,11 +22,11 @@ impl OpenAPIConverter {
         }
     }
 
-    fn convert_paths(&self, routes: &[Route]) -> HashMap<String, PathItem> {
+    fn convert_paths(routes: &[Route]) -> HashMap<String, PathItem> {
         let mut paths = HashMap::new();
 
         for route in routes {
-            let operation = self.generate_operation(route);
+            let operation = Self::generate_operation(route);
 
             let path_item = PathItem {
                 get: if route.method == HttpMethod::Get { Some(operation.clone()) } else { None },
@@ -815,7 +815,7 @@ impl OpenAPIConverter {
     }
 
 
-    fn create_components(routes: &[Route]) -> Components {
+    pub fn create_components(routes: &[Route]) -> Components {
         let mut components = Components {
             schemas: Some(HashMap::new()),
             responses: Some(HashMap::new()),
@@ -1075,7 +1075,7 @@ impl OpenAPIConverter {
     fn get_response_schema(route: &Route) -> Schema {
         match &route.binding {
             BindingType::Default { output_type, .. } => {
-                if (output_type == "binary") {
+                if output_type == "binary" {
                     Schema::String {
                         format: Some("binary".to_string()),
                         enum_values: None,

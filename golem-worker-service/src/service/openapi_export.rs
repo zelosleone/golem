@@ -1,9 +1,11 @@
-use crate::api::definition::{ApiDefinition, Route, HttpMethod, BindingType};
-use crate::api::openapi::{OpenAPIConverter, OpenAPISpec, validate_openapi, OpenAPIError};
-use golem_service_base::auth::{EmptyAuthCtx, DefaultNamespace};
+use crate::api::definition::{HttpMethod, BindingType};
+use crate::api::openapi::{OpenAPIConverter, validate_openapi, OpenAPIError};
+use golem_service_base::auth::EmptyAuthCtx;
 use golem_worker_service_base::gateway_api_definition::{ApiDefinitionId, ApiVersion};
 use golem_worker_service_base::gateway_api_definition::http::MethodPattern;
 use golem_worker_service_base::gateway_binding::gateway_binding_compiled::GatewayBindingCompiled;
+use golem_worker_service_base::service::gateway::api_definition::ApiDefinitionError;
+use golem_service_base::cache::CacheError;
 use axum::{
     extract::{Path, State},
     Json,
@@ -31,8 +33,21 @@ impl From<OpenAPIError> for StatusCode {
         match err {
             OpenAPIError::InvalidDefinition(_) => StatusCode::BAD_REQUEST,
             OpenAPIError::ValidationFailed(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            OpenAPIError::CacheError(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
+    }
+}
+
+impl From<CacheError> for StatusCode {
+    fn from(err: CacheError) -> Self {
+        error!("Cache error: {}", err);
+        StatusCode::INTERNAL_SERVER_ERROR
+    }
+}
+
+impl From<ApiDefinitionError> for StatusCode {
+    fn from(err: ApiDefinitionError) -> Self {
+        error!("API definition error: {}", err);
+        StatusCode::NOT_FOUND
     }
 }
 
@@ -48,7 +63,7 @@ fn convert_method(method: &MethodPattern) -> HttpMethod {
         // Provide a default case to handle unexpected variants
         _ => {
             error!("Unsupported HTTP method encountered: {:?}", method);
-            HttpMethod::Get // Defaulting to GET; adjust as needed
+            HttpMethod::Get
         }
     }
 }
@@ -80,14 +95,17 @@ pub async fn export_openapi(
     let api_def = services.definition_service.get(
         &ApiDefinitionId(id.clone()),
         &ApiVersion(version.clone()),
-        &namespace,
+        &EmptyAuthCtx::default(),
         &EmptyAuthCtx::default(),
     ).await?;
 
     let spec = OpenAPIConverter::convert(&api_def);
 
     // Validate the spec
-    validate_openapi(&spec)?;
+    validate_openapi(&spec).map_err(|e| {
+        error!("OpenAPI validation failed: {}", e);
+        StatusCode::from(e)
+    })?;
 
     // Cache the valid spec
     services.cache.set(&cache_key, &spec).await?;

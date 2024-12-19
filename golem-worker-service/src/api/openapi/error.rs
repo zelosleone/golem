@@ -54,11 +54,9 @@ fn validate_path_item(path: &str, item: &ReferenceOr<openapiv3::PathItem>) -> Re
 
 fn validate_components(components: &openapiv3::Components) -> Result<(), OpenAPIError> {
     // Validate schemas
-    if let Some(schemas) = &components.schemas {
-        for (name, schema) in schemas {
-            if let ReferenceOr::Item(schema) = schema {
-                validate_schema(name, schema)?;
-            }
+    for (name, schema) in &components.schemas {
+        if let ReferenceOr::Item(schema) = schema {
+            validate_schema(name, schema)?;
         }
     }
     Ok(())

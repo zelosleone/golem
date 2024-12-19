@@ -6,7 +6,7 @@ pub struct OpenAPISpec {
     pub openapi: String,
     pub info: Info,
     pub paths: HashMap<String, PathItem>,
-    pub components: Option<Components>,
+    pub components: Option<GolemComponents>,
     pub security: Option<Vec<HashMap<String, Vec<String>>>>,
 }
 
@@ -82,7 +82,7 @@ pub struct Response {
 
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Components {
+pub struct GolemComponents {
     pub schemas: Option<HashMap<String, Schema>>,
     pub responses: Option<HashMap<String, Response>>,
     pub parameters: Option<HashMap<String, Parameter>>,
