@@ -18,11 +18,13 @@ use bincode::{BorrowDecode, Decode, Encode};
 use bincode::de::{BorrowDecoder, Decoder};
 use bincode::enc::Encoder;
 use bincode::error::{DecodeError, EncodeError};
-use golem_wasm_ast::analysis::analysed_type::*;
+use golem_wasm_ast::analysis::AnalysedType;
+use golem_wasm_ast::analysis::ast;
 use golem_wasm_rpc::IntoValue;
-use golem_api_grpc::proto::golem::worker::{PromiseId as GrpcPromiseId, ShardId};
+use golem_api_grpc::proto::golem::worker::{PromiseId as GrpcPromiseId};
 use golem_api_grpc::proto::golem::worker::RoutingTableEntry as GrpcRoutingTableEntry;
 use golem_api_grpc::proto::golem::common::StringFilterComparator as GrpcStringFilterComparator;
+use golem_api_grpc::proto::golem::shardmanager::{ShardId as GrpcShardId};
 use http::Uri;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde::de::{self, Unexpected, Visitor};
@@ -35,6 +37,8 @@ use std::time::{Duration, SystemTime};
 use typed_path::Utf8UnixPathBuf;
 use url::Url;
 use uuid::{uuid, Uuid};
+
+use crate::model::protobuf::IndexedResourceKey;
 
 pub mod api_types;
 pub mod component;
@@ -67,22 +71,37 @@ impl From<GrpcPromiseId> for PromiseId {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StringFilterComparator(GrpcStringFilterComparator);
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Encode, Decode)]
+pub enum StringFilterComparator {
+    Equal,
+    NotEqual,
+    Like,
+    NotLike,
+}
 
 impl Display for StringFilterComparator {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "StringFilterComparator({:?})", self.0)
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StringFilterComparator::Equal => write!(f, "Equal"),
+            StringFilterComparator::NotEqual => write!(f, "NotEqual"),
+            StringFilterComparator::Like => write!(f, "Like"),
+            StringFilterComparator::NotLike => write!(f, "NotLike"),
+        }
     }
 }
 
 impl From<GrpcStringFilterComparator> for StringFilterComparator {
     fn from(grpc_comparator: GrpcStringFilterComparator) -> Self {
-        StringFilterComparator(grpc_comparator)
+        match grpc_comparator {
+            GrpcStringFilterComparator::Equal => StringFilterComparator::Equal,
+            GrpcStringFilterComparator::NotEqual => StringFilterComparator::NotEqual,
+            GrpcStringFilterComparator::Like => StringFilterComparator::Like,
+            GrpcStringFilterComparator::NotLike => StringFilterComparator::NotLike,
+        }
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RoutingTableEntry {
     pub worker_id: String,
     pub shard_id: ShardId,
@@ -357,7 +376,7 @@ impl Display for OwnedWorkerId {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Encode, Decode, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Encode, Decode, Serialize, Deserialize)]
 #[cfg_attr(feature = "poem", derive(poem_openapi::Object))]
 #[cfg_attr(feature = "poem", oai(rename_all = "camelCase"))]
 #[serde(rename_all = "camelCase")]
@@ -447,19 +466,10 @@ impl From<&WorkerId> for TargetWorkerId {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Encode, Decode, Serialize, Deserialize)]
-#[cfg_attr(feature = "poem", derive(poem_openapi::Object))]
-#[cfg_attr(feature = "poem", oai(rename_all = "camelCase"))]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Encode, Decode, Serialize, Deserialize)]
 pub struct PromiseId {
     pub worker_id: WorkerId,
     pub oplog_idx: OplogIndex,
-}
-
-impl PromiseId {
-    pub fn to_redis_key(&self) -> String {
-        format!("{}:{}", self.worker_id.to_redis_key(), self.oplog_idx)
-    }
 }
 
 impl Display for PromiseId {
@@ -484,57 +494,10 @@ impl IntoValue for PromiseId {
     }
 }
 
-/// Actions that can be scheduled to be executed at a given point in time
-#[derive(Debug, Clone, Hash, Eq, PartialEq, Encode, Decode)]
-pub enum ScheduledAction {
-    /// Completes a given promise
-    CompletePromise {
-        account_id: AccountId,
-        promise_id: PromiseId,
-    },
-    /// Archives all entries from the first non-empty layer of an oplog to the next layer,
-    /// if the last oplog index did not change. If there are more layers below, schedules
-    /// a next action to archive the next layer.
-    ArchiveOplog {
-        owned_worker_id: OwnedWorkerId,
-        last_oplog_index: OplogIndex,
-        next_after: Duration,
-    },
-}
-
-impl ScheduledAction {
-    pub fn owned_worker_id(&self) -> OwnedWorkerId {
-        match self {
-            ScheduledAction::CompletePromise {
-                account_id,
-                promise_id,
-            } => OwnedWorkerId::new(account_id, &promise_id.worker_id),
-            ScheduledAction::ArchiveOplog {
-                owned_worker_id, ..
-            } => owned_worker_id.clone(),
-        }
-    }
-}
-
-impl Display for ScheduledAction {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ScheduledAction::CompletePromise { promise_id, .. } => {
-                write!(f, "complete[{}]", promise_id)
-            }
-            ScheduledAction::ArchiveOplog {
-                owned_worker_id, ..
-            } => {
-                write!(f, "archive[{}]", owned_worker_id)
-            }
-        }
-    }
-}
-
 #[derive(Debug, Encode, Decode)]
 pub struct ScheduleId {
     pub timestamp: i64,
-    pub action: ScheduledAction,
+    pub action: PromiseId,
 }
 
 impl Display for ScheduleId {
@@ -665,7 +628,7 @@ impl IntoValue for WorkerMetadata {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Encode, Decode)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Encode, Decode)]
 #[cfg_attr(feature = "poem", derive(poem_openapi::Object))]
 #[cfg_attr(feature = "poem", oai(rename_all = "camelCase"))]
 #[serde(rename_all = "camelCase")]
@@ -813,14 +776,14 @@ impl Default for WorkerStatusRecord {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
+#[derive(Clone, Debug, PartialEq, Encode, Decode)]
 pub struct FailedUpdateRecord {
     pub timestamp: Timestamp,
     pub target_version: ComponentVersion,
     pub details: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
+#[derive(Clone, Debug, PartialEq, Encode, Decode)]
 pub struct SuccessfulUpdateRecord {
     pub timestamp: Timestamp,
     pub target_version: ComponentVersion,
@@ -1050,82 +1013,7 @@ pub trait HasAccountId {
     fn account_id(&self) -> AccountId;
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Encode, Decode)]
-#[cfg_attr(feature = "poem", derive(poem_openapi::Enum))]
-pub enum StringFilterComparator {
-    Equal,
-    NotEqual,
-    Like,
-    NotLike,
-}
-
-impl StringFilterComparator {
-    pub fn matches<T: Display>(&self, value1: &T, value2: &T) -> bool {
-        match self {
-            StringFilterComparator::Equal => value1.to_string() == value2.to_string(),
-            StringFilterComparator::NotEqual => value1.to_string() != value2.to_string(),
-            StringFilterComparator::Like => {
-                value1.to_string().contains(value2.to_string().as_str())
-            }
-            StringFilterComparator::NotLike => {
-                !value1.to_string().contains(value2.to_string().as_str())
-            }
-        }
-    }
-}
-
-impl FromStr for StringFilterComparator {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "==" | "=" | "equal" | "eq" => Ok(StringFilterComparator::Equal),
-            "!=" | "notequal" | "ne" => Ok(StringFilterComparator::NotEqual),
-            "like" => Ok(StringFilterComparator::Like),
-            "notlike" => Ok(StringFilterComparator::NotLike),
-            _ => Err(format!("Unknown String Filter Comparator: {}", s)),
-        }
-    }
-}
-
-impl TryFrom<i32> for StringFilterComparator {
-    type Error = String;
-
-    fn try_from(value: i32) -> Result<Self, Self::Error> {
-        match value {
-            0 => Ok(StringFilterComparator::Equal),
-            1 => Ok(StringFilterComparator::NotEqual),
-            2 => Ok(StringFilterComparator::Like),
-            3 => Ok(StringFilterComparator::NotLike),
-            _ => Err(format!("Unknown String Filter Comparator: {}", value)),
-        }
-    }
-}
-
-impl From<StringFilterComparator> for i32 {
-    fn from(value: StringFilterComparator) -> Self {
-        match value {
-            StringFilterComparator::Equal => 0,
-            StringFilterComparator::NotEqual => 1,
-            StringFilterComparator::Like => 2,
-            StringFilterComparator::NotLike => 3,
-        }
-    }
-}
-
-impl Display for StringFilterComparator {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let s = match self {
-            StringFilterComparator::Equal => "==",
-            StringFilterComparator::NotEqual => "!=",
-            StringFilterComparator::Like => "like",
-            StringFilterComparator::NotLike => "notlike",
-        };
-        write!(f, "{}", s)
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Encode, Decode)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Encode, Decode)]
 #[cfg_attr(feature = "poem", derive(poem_openapi::Enum))]
 pub enum FilterComparator {
     Equal,
@@ -1328,7 +1216,7 @@ impl Serialize for ComponentFilePath {
 impl<'de> Deserialize<'de> for ComponentFilePath {
     fn deserialize<D>(deserializer: D) -> Result<ComponentFilePath, D::Error>
     where
-        D: Deserializer<'de>,
+        D: serde::Deserializer<'de>,
     {
         let str = String::deserialize(deserializer)?;
         Self::from_abs_str(&str).map_err(serde::de::Error::custom)
@@ -1532,171 +1420,6 @@ impl Display for ComponentFilePathWithPermissionsList {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Encode, Decode)]
-pub struct IdempotencyKey {
-    pub value: String,
-}
-
-impl IdempotencyKey {
-    const ROOT_NS: Uuid = uuid!("9C19B15A-C83D-46F7-9BC3-EAD7923733F4");
-
-    pub fn new(value: String) -> Self {
-        Self { value }
-    }
-
-    pub fn from_uuid(value: Uuid) -> Self {
-        Self {
-            value: value.to_string(),
-        }
-    }
-
-    pub fn fresh() -> Self {
-        Self::from_uuid(Uuid::new_v4())
-    }
-
-    /// Generates a deterministic new idempotency key using a base idempotency key and an oplog index.
-    ///
-    /// The base idempotency key determines the "namespace" of the generated key UUIDv5. If
-    /// the base idempotency key is already an UUID, it is directly used as the namespace of the v5 algorithm,
-    /// while the name part is derived from the given oplog index.
-    ///
-    /// If the base idempotency key is not an UUID (as it can be an arbitrary user-provided string), then first
-    /// we generate a UUIDv5 in the ROOT_NS namespace and use that as unique namespace for generating
-    /// the new idempotency key.
-    pub fn derived(base: &IdempotencyKey, oplog_index: OplogIndex) -> Self {
-        let namespace = if let Ok(base_uuid) = Uuid::parse_str(&base.value) {
-            base_uuid
-        } else {
-            Uuid::new_v5(&Self::ROOT_NS, base.value.as_bytes())
-        };
-        let name = format!("oplog-index-{}", oplog_index);
-        Self::from_uuid(Uuid::new_v5(&namespace, name.as_bytes()))
-    }
-}
-
-impl Serialize for IdempotencyKey {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        self.value.serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for IdempotencyKey {
-    fn deserialize<D>(deserializer: D) -> Result<IdempotencyKey, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let value = String::deserialize(deserializer)?;
-        Ok(IdempotencyKey { value })
-    }
-}
-
-impl IntoValue for IdempotencyKey {
-    fn into_value(self) -> golem_wasm_rpc::Value {
-        golem_wasm_rpc::Value::String(self.value)
-    }
-
-    fn get_type() -> AnalysedType {
-        ast::wasm_str()
-    }
-}
-
-impl Display for IdempotencyKey {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.value)
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct UriWrapper(pub Uri);
-
-impl IntoValue for UriWrapper {
-    fn into_value(self) -> golem_wasm_rpc::Value {
-        golem_wasm_rpc::Value::String(self.0.to_string())
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Encode, Decode)]
-pub struct ResourceKey<T>
-where
-    T: Clone + std::fmt::Debug + PartialEq + Eq + Hash + Serialize + Deserialize<'static> + Send + Sync,
-{
-    pub component_id: ComponentId,
-    pub key: T,
-}
-
-impl<T> ResourceKey<T>
-where
-    T: Clone + std::fmt::Debug + PartialEq + Eq + Hash + Serialize + Deserialize<'static> + Send + Sync,
-{
-    pub fn new(component_id: ComponentId, key: T) -> Self {
-        Self { component_id, key }
-    }
-}
-
-impl<T> Encode for ResourceKey<T>
-where
-    T: Clone + std::fmt::Debug + PartialEq + Eq + Hash + Serialize + Deserialize<'static> + Send + Sync + Encode,
-{
-    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
-        self.component_id.encode(encoder)?;
-        self.key.encode(encoder)
-    }
-}
-
-impl<T> Decode for ResourceKey<T>
-where
-    T: Clone + std::fmt::Debug + PartialEq + Eq + Hash + Serialize + Deserialize<'static> + Send + Sync + Decode,
-{
-    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
-        let component_id = ComponentId::decode(decoder)?;
-        let key = T::decode(decoder)?;
-        Ok(Self { component_id, key })
-    }
-}
-
-impl<T> Display for ResourceKey<T>
-where
-    T: Clone + std::fmt::Debug + PartialEq + Eq + Hash + Serialize + Deserialize<'static> + Send + Sync + Display,
-{
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}:{}", self.component_id, self.key)
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "poem", derive(poem_openapi::Object))]
-#[cfg_attr(feature = "poem", oai(rename_all = "camelCase"))]
-#[serde(rename_all = "camelCase")]
-pub struct AnalysedTypeWrapper<T> 
-where 
-    T: Clone + std::fmt::Debug + PartialEq + Serialize + Deserialize<'static> + Send + Sync,
-{
-    #[serde(bound(deserialize = "T: Deserialize<'static>"))]
-    pub inner: T,
-}
-
-impl<T> Encode for AnalysedTypeWrapper<T>
-where
-    T: Clone + std::fmt::Debug + PartialEq + Serialize + Deserialize<'static> + Send + Sync + Encode,
-{
-    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
-        self.inner.encode(encoder)
-    }
-}
-
-impl<T> Decode for AnalysedTypeWrapper<T>
-where
-    T: Clone + std::fmt::Debug + PartialEq + Serialize + Deserialize<'static> + Send + Sync + Decode,
-{
-    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
-        let inner = T::decode(decoder)?;
-        Ok(AnalysedTypeWrapper { inner })
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Encode, Decode)]
 pub struct ScanCursor {
     pub start_key: Vec<u8>,
@@ -1817,21 +1540,46 @@ impl Decode for WorkerEventType {
 }
 
 impl Type for IdempotencyKey {
-    type RawElementValueType = Self;
-    fn as_raw_value(&self) -> Option<&Self::RawElementValueType> {
-        Some(self)
+    type RawValueType = String;
+    type RawElementValueType = String;
+
+    fn as_raw_value(&self) -> Option<&Self::RawValueType> {
+        Some(&self.0)
     }
-    fn raw_element_iter<'a>(&'a self) -> Box<dyn Iterator<Item = &'a Self::RawElementValueType> + 'a> {
-        Box::new(std::iter::once(self))
+
+    fn raw_element_iter(&self) -> Box<dyn Iterator<Item = &Self::RawElementValueType>> {
+        Box::new(std::iter::once(&self.0))
     }
 }
 
 impl Type for WorkerId {
-    type RawElementValueType = Self;
-    fn as_raw_value(&self) -> Option<&Self::RawElementValueType> {
-        Some(self)
+    type RawValueType = String;
+    type RawElementValueType = String;
+
+    fn as_raw_value(&self) -> Option<&Self::RawValueType> {
+        Some(&self.0)
     }
-    fn raw_element_iter<'a>(&'a self) -> Box<dyn Iterator<Item = &'a Self::RawElementValueType> + 'a> {
-        Box::new(std::iter::once(self))
+
+    fn raw_element_iter(&self) -> Box<dyn Iterator<Item = &Self::RawElementValueType>> {
+        Box::new(std::iter::once(&self.0))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ResourceKey<T>
+where
+    T: Clone + std::fmt::Debug + PartialEq + Eq + Hash + Serialize + Deserialize<'static> + Send + Sync,
+{
+    pub component_id: ComponentId,
+    pub key: T,
+}
+
+impl IntoValue for UriWrapper {
+    fn into_value(self) -> golem_wasm_rpc::Value {
+        golem_wasm_rpc::Value::String(self.0.to_string())
+    }
+
+    fn get_type() -> AnalysedType {
+        ast::wasm_str()
     }
 }

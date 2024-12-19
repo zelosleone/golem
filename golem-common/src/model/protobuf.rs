@@ -17,9 +17,8 @@ use crate::model::{
     WorkerId, ComponentType, FilterComparator, LogLevel, 
     ComponentFilePermissions, InitialComponentFile,
     ComponentFileSystemNode, ComponentFileSystemNodeDetails, GatewayBindingType,
-    WorkerStatus, OplogIndex, ApiIdempotencyKey, NumberOfShards, TargetWorkerId,
-    InitialComponentFileKey, PromiseId, ShardId, Pod, RoutingTableEntry, RoutingTable,
-    StringFilterComparator, ApiWorkerId
+    WorkerStatus, ApiIdempotencyKey, TargetWorkerId,
+    InitialComponentFileKey, PromiseId, StringFilterComparator, ApiWorkerId
 };
 use golem_api_grpc::proto::golem::worker::{
     WorkerFilter as GrpcWorkerFilter, FileSystemNode, PromiseId as GrpcPromiseId
@@ -236,18 +235,6 @@ impl From<StringFilterComparator> for GrpcStringFilterComparator {
     }
 }
 
-impl From<GrpcRoutingTableEntry> for RoutingTableEntry {
-    fn from(value: GrpcRoutingTableEntry) -> Self {
-        Self {
-            // Assuming fields exist in both structs
-            id: value.id,
-            shard_id: value.shard_id.map(ShardId::from),
-            shard_count: value.shard_count,
-            filter: value.filter.map(StringFilterComparator::from),
-        }
-    }
-}
-
 impl From<GrpcStringFilterComparator> for StringFilterComparator {
     fn from(value: GrpcStringFilterComparator) -> Self {
         match value {
@@ -384,17 +371,6 @@ impl From<IndexedResourceKey> for golem_api_grpc::proto::golem::worker::IndexedR
             resource_name: key.resource_name,
             resource_params: key.resource_params,
         }
-    }
-}
-
-impl TryFrom<golem_api_grpc::proto::golem::worker::IndexedResourceMetadata> for IndexedResourceKey {
-    type Error = String;
-
-    fn try_from(value: golem_api_grpc::proto::golem::worker::IndexedResourceMetadata) -> Result<Self, Self::Error> {
-        Ok(Self {
-            resource_name: value.resource_name,
-            resource_params: value.resource_params,
-        })
     }
 }
 
