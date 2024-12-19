@@ -1,8 +1,8 @@
 use crate::api::definition::types::{ApiDefinition, BindingType};
 use golem_wasm_ast::analysis::{
     AnalysedType, TypeF32, TypeF64, TypeBool, TypeList, TypeOption, 
-    TypeRecord, TypeResult, NameTypePair, TypeStr, TypeI32, TypeI64,
-    TypeVoid
+    TypeRecord, TypeResult, NameTypePair, TypeStr, TypeInt32, TypeInt64,
+    TypeUnit // Replaced TypeVoid with TypeUnit
 };
 
 pub fn validate_api_definition(api: &ApiDefinition) -> Result<(), String> {
@@ -23,12 +23,12 @@ pub fn validate_api_definition(api: &ApiDefinition) -> Result<(), String> {
 fn parse_type(type_str: &str) -> Result<AnalysedType, String> {
     match type_str {
         "string" => Ok(AnalysedType::Str(TypeStr)),
-        "i32" => Ok(AnalysedType::Int32(TypeI32)),
-        "i64" => Ok(AnalysedType::Int64(TypeI64)),
+        "i32" => Ok(AnalysedType::Int32(TypeInt32)), // Updated variant and type
+        "i64" => Ok(AnalysedType::Int64(TypeInt64)), // Updated variant and type
         "f32" => Ok(AnalysedType::F32(TypeF32)),
         "f64" => Ok(AnalysedType::F64(TypeF64)),
         "bool" => Ok(AnalysedType::Bool(TypeBool)),
-        "void" => Ok(AnalysedType::Void(TypeVoid)),
+        "void" => Ok(AnalysedType::Unit(TypeUnit)), // Updated variant and type
         t if t.starts_with("list<") => {
             let inner_type = t.trim_start_matches("list<").trim_end_matches('>');
             let inner = parse_type(inner_type)?;
@@ -84,7 +84,7 @@ fn validate_wit_binding_types(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::definition::types::{Route, HttpMethod}; // Added import
+    use crate::api::definition::types::{Route, HttpMethod}; // Ensure Route and HttpMethod are imported
 
     #[test]
     fn test_valid_api_definition() {
