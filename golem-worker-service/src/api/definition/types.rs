@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use golem_wasm_ast::analysis::AnalysedType;
 
 /// Base binding types for the API Gateway
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,10 +31,10 @@ impl std::fmt::Display for BindingType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             BindingType::Default { function_name, input_type, output_type } => {
-                write!(f, "Default({}, {}, {})", function_name, input_type, output_type)
+                write!(f, "Default({}, {:?}, {:?})", function_name, input_type, output_type)
             },
             BindingType::Worker { function_name, input_type, output_type } => {
-                write!(f, "Worker({}, {}, {})", function_name, input_type, output_type)
+                write!(f, "Worker({}, {:?}, {:?})", function_name, input_type, output_type)
             },
             BindingType::FileServer { root_dir } => {
                 write!(f, "FileServer({})", root_dir)

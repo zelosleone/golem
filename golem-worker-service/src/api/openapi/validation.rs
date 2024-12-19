@@ -1,98 +1,228 @@
-use super::types::{OpenAPISpec, Schema, PathItem, ParameterLocation};
-use std::collections::HashMap;
+use openapiv3::{OpenAPI, PathItem, Parameter, ReferenceOr, Components, Schema, Type, SchemaKind};
+use golem_worker_service_base::gateway_api_definition::http::CompiledHttpApiDefinition;
+use std::fmt;
+use std::collections::HashSet;
+use serde_json::Value;
+use thiserror::Error;
 
-pub fn validate_openapi(spec: &OpenAPISpec) -> Result<(), String> {
-    validate_paths(&spec.paths)?;
-    validate_schemas(&spec.components.as_ref().unwrap().schemas)?;
-    Ok(())
+#[derive(Debug, Error)]
+pub enum ValidationError {
+    #[error("Duplicate path parameter '{param}' in path '{path}'")]
+    DuplicatePathParameter { path: String, param: String },
+
+    #[error("Missing path parameter '{param}' in path '{path}'")]
+    MissingPathParameter { path: String, param: String },
+
+    #[error("Invalid parameter type: {0}")]
+    InvalidParameterType(String),
+
+    #[error("Schema validation error: {0}")]
+    SchemaValidation(String),
+
+    #[error("Security scheme validation error: {0}")]
+    SecuritySchemeValidation(String),
+
+    #[error("CORS configuration error: {0}")]
+    CorsValidation(String),
 }
 
-fn validate_paths(paths: &HashMap<String, PathItem>) -> Result<(), String> {
-    for (path, item) in paths {
-        if let Some(op) = &item.get {
-            validate_operation(path, op)?;
-        }
-        if let Some(op) = &item.post {
-             validate_operation(path, op)?;
-        }
-         if let Some(op) = &item.put {
-              validate_operation(path, op)?;
-        }
-         if let Some(op) = &item.delete {
-              validate_operation(path, op)?;
+pub struct OpenAPIValidator {
+    strict_mode: bool,
+    validate_examples: bool,
+}
+
+impl OpenAPIValidator {
+    pub fn new() -> Self {
+        Self {
+            strict_mode: false,
+            validate_examples: true,
         }
     }
-    Ok(())
-}
 
-fn validate_operation(path: &str, op: &super::types::Operation) -> Result<(), String> {
-     if let Some(params) = &op.parameters {
-            validate_parameters(path, params)?;
+    pub fn strict(mut self) -> Self {
+        self.strict_mode = true;
+        self
     }
-    Ok(())
-}
 
-
-fn validate_parameters(path: &str, params: &Vec<super::types::Parameter>) -> Result<(), String> {
-    for p in params.iter() {
-        if p.r#in == ParameterLocation::Path {
-             validate_path_parameter(path, p)?;
-        }
+    pub fn with_example_validation(mut self, validate: bool) -> Self {
+        self.validate_examples = validate;
+        self
     }
-    Ok(())
-}
 
+    pub fn validate(&self, spec: &OpenAPI) -> Result<(), Vec<ValidationError>> {
+        let mut errors = Vec::new();
 
-fn validate_path_parameter(path: &str, p: &super::types::Parameter) -> Result<(), String> {
-    let path_segments: Vec<&str> = path.split('/').collect();
-      let matching_segments = path_segments
-            .iter()
-            .filter(|segment| segment.starts_with('{') && segment.ends_with('}'))
-            .map(|segment| segment[1..segment.len() - 1].to_string()).collect::<Vec<_>>();
-    
-        if !matching_segments.iter().any(|s| s == &p.name) {
-            return Err(format!(
-                "Path parameter `{}` not found in path `{}`",
-                p.name, path
-            ));
-        }
-        Ok(())
-}
-
-
-fn validate_schemas(schemas: &Option<HashMap<String, Schema>>) -> Result<(), String> {
-    if let Some(schemas) = schemas {
-        for (key, schema) in schemas.iter() {
-             validate_schema(key, schema)?;
-        }
-    }
-      Ok(())
-}
-
-fn validate_schema(key: &String, schema: &Schema) -> Result<(), String> {
-    match schema {
-        Schema::Object { properties, .. } => {
-            for (key, schema) in properties {
-               validate_schema(key, schema)?;
+        // Validate paths
+        for (path, item) in spec.paths.paths.iter() {
+            if let Err(e) = self.validate_path_item(path, item) {
+                errors.extend(e);
             }
         }
-         Schema::Array { items } => {
-              validate_schema(&"array_item".to_string(), &items)?;
+
+        // Validate components
+        if let Err(e) = self.validate_components(&spec.components) {
+            errors.extend(e);
         }
-          Schema::Ref { reference } => {
-              validate_schema_ref(key, reference)?;
+
+        // Validate security schemes
+        if let Some(security) = &spec.security {
+            if let Err(e) = self.validate_security_requirements(security, &spec.components) {
+                errors.extend(e);
+            }
         }
-        _ => {}
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
     }
-      Ok(())
+
+    fn validate_path_item(&self, path: &str, item: &ReferenceOr<PathItem>) -> Result<(), Vec<ValidationError>> {
+        let mut errors = Vec::new();
+        let path_item = match item {
+            ReferenceOr::Item(item) => item,
+            ReferenceOr::Reference { reference } => {
+                if self.strict_mode {
+                    errors.push(ValidationError::SchemaValidation(
+                        format!("References not allowed in strict mode: {}", reference)
+                    ));
+                }
+                return if errors.is_empty() { Ok(()) } else { Err(errors) };
+            }
+        };
+
+        // Extract path parameters
+        let path_params: HashSet<_> = path
+            .split('/')
+            .filter(|s| s.starts_with('{') && s.ends_with('}'))
+            .map(|s| s[1..s.len()-1].to_string())
+            .collect();
+
+        // Validate parameters
+        let declared_params: HashSet<_> = path_item
+            .parameters
+            .iter()
+            .filter_map(|p| match p {
+                ReferenceOr::Item(p) if p.parameter_data.location == "path" => {
+                    Some(p.parameter_data.name.clone())
+                }
+                _ => None,
+            })
+            .collect();
+
+        // Check for missing parameters
+        for param in path_params.difference(&declared_params) {
+            errors.push(ValidationError::MissingPathParameter {
+                path: path.to_string(),
+                param: param.clone(),
+            });
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+
+    fn validate_components(&self, components: &Option<Components>) -> Result<(), Vec<ValidationError>> {
+        let mut errors = Vec::new();
+        
+        if let Some(components) = components {
+            // Validate schemas
+            for (name, schema) in components.schemas.iter() {
+                if let ReferenceOr::Item(schema) = schema {
+                    if self.validate_examples && schema.example.is_some() {
+                        if let Err(e) = self.validate_example(name, schema) {
+                            errors.push(e);
+                        }
+                    }
+                }
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+
+    fn validate_example(&self, name: &str, schema: &Schema) -> Result<(), ValidationError> {
+        if let Some(example) = &schema.example {
+            match &schema.schema_kind {
+                SchemaKind::Type(Type::String(_)) if matches!(example, Value::String(_)) => Ok(()),
+                SchemaKind::Type(Type::Integer(_)) if matches!(example, Value::Number(n)) && n.is_i64() => Ok(()),
+                SchemaKind::Type(Type::Number(_)) if matches!(example, Value::Number(_)) => Ok(()),
+                SchemaKind::Type(Type::Boolean(_)) if matches!(example, Value::Bool(_)) => Ok(()),
+                SchemaKind::Type(Type::Array(_)) if matches!(example, Value::Array(_)) => Ok(()),
+                SchemaKind::Type(Type::Object(_)) if matches!(example, Value::Object(_)) => Ok(()),
+                _ => Err(ValidationError::SchemaValidation(
+                    format!("Example for '{}' does not match schema type", name)
+                )),
+            }
+        } else {
+            Ok(())
+        }
+    }
+
+    fn validate_security_requirements(
+        &self,
+        security: &[SecurityRequirement],
+        components: &Option<Components>,
+    ) -> Result<(), Vec<ValidationError>> {
+        let mut errors = Vec::new();
+
+        if let Some(components) = components {
+            for req in security {
+                for scheme_name in req.keys() {
+                    if !components.security_schemes.contains_key(scheme_name) {
+                        errors.push(ValidationError::SecuritySchemeValidation(
+                            format!("Security scheme '{}' not found in components", scheme_name)
+                        ));
+                    }
+                }
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
 }
 
-fn validate_schema_ref(_key: &String, reference: &String) -> Result<(), String> {
-   if !reference.starts_with("#/components/schemas/") {
-        return Err(format!(
-            "Schema reference `{}` is invalid",
-            reference
-        ));
-   }
-      Ok(())
+pub fn validate_openapi_spec(spec: &OpenAPI) -> Result<(), Vec<ValidationError>> {
+    let validator = OpenAPIValidator::new();
+    validator.validate(spec)
+}
+
+pub fn validate_api_definition<T>(api_def: &CompiledHttpApiDefinition<T>) -> Result<(), Vec<ValidationError>> {
+    let validator = OpenAPIValidator::new();
+    let spec = OpenAPI {
+        openapi: "3.0.0".to_string(),
+        info: None,
+        servers: None,
+        paths: api_def.routes.iter().map(|route| {
+            let path = route.path.clone();
+            let item = PathItem {
+                get: None,
+                put: None,
+                post: None,
+                delete: None,
+                options: None,
+                head: None,
+                patch: None,
+                parameters: vec![],
+            };
+            (path, ReferenceOr::Item(item))
+        }).collect(),
+        components: None,
+        security_schemes: None,
+        tags: None,
+        external_docs: None,
+    };
+    validator.validate(&spec)
 }

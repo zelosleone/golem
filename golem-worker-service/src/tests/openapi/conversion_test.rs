@@ -1,6 +1,6 @@
 use crate::api::{
     definition::types::{ApiDefinition, Route, HttpMethod, BindingType},
-    openapi::{OpenAPIConverter, Schema, PathItem, Operation},
+    openapi::{OpenAPIConverter, Schema, SchemaKind, Type, PathItem, Operation, ReferenceOr, StatusCode},
 };
 use std::collections::HashMap;
 
@@ -21,12 +21,30 @@ fn create_test_route(path: &str, method: HttpMethod, input: &str, output: &str) 
 #[test]
 fn test_primitive_type_conversion() {
     let types = [
-        ("string", Schema::String { format: None, enum_values: None }),
-        ("i32", Schema::Integer { format: None }),
-        ("i64", Schema::Integer { format: None }),
-        ("f32", Schema::Number { format: None }),
-        ("f64", Schema::Number { format: None }),
-        ("bool", Schema::Boolean),
+        ("string", Schema {
+            schema_data: Default::default(),
+            schema_kind: SchemaKind::Type(Type::String(Default::default())),
+        }),
+        ("i32", Schema {
+            schema_data: Default::default(),
+            schema_kind: SchemaKind::Type(Type::Integer(Default::default())),
+        }),
+        ("i64", Schema {
+            schema_data: Default::default(),
+            schema_kind: SchemaKind::Type(Type::Integer(Default::default())),
+        }),
+        ("f32", Schema {
+            schema_data: Default::default(),
+            schema_kind: SchemaKind::Type(Type::Number(Default::default())),
+        }),
+        ("f64", Schema {
+            schema_data: Default::default(),
+            schema_kind: SchemaKind::Type(Type::Number(Default::default())),
+        }),
+        ("bool", Schema {
+            schema_data: Default::default(),
+            schema_kind: SchemaKind::Type(Type::Boolean(Default::default())),
+        }),
     ];
 
     for (wit_type, expected_schema) in types {
@@ -79,41 +97,67 @@ fn test_complex_type_conversion() {
     if let Some(operation) = &path_item.post {
         let schema = &operation.request_body.as_ref().unwrap().content["application/json"].schema;
         match schema {
-            Schema::Object { properties, .. } => {
-                assert!(properties.contains_key("name"));
-                assert!(properties.contains_key("age"));
-                assert!(properties.contains_key("tags"));
-                
-                match &properties["tags"] {
-                    Schema::Array { items } => {
-                        assert!(matches!(**items, Schema::String { .. }));
+            ReferenceOr::Item(Schema { schema_data: _, schema_kind }) => {
+                match schema_kind {
+                    SchemaKind::Type(Type::Object(obj)) => {
+                        // Check top-level object properties
+                        assert!(obj.properties.contains_key("name"));
+                        assert!(obj.properties.contains_key("age"));
+                        assert!(obj.properties.contains_key("tags"));
+                        
+                        // Check tags array
+                        match &obj.properties["tags"] {
+                            ReferenceOr::Item(Schema { schema_data: _, schema_kind: SchemaKind::Type(Type::Array(array_type)) }) => {
+                                // Verify array items are strings
+                                match &*array_type.items {
+                                    ReferenceOr::Item(Schema { schema_data: _, schema_kind: SchemaKind::Type(Type::String(_)) }) => (),
+                                    _ => panic!("Expected string type for array items"),
+                                }
+                            },
+                            _ => panic!("Expected array schema for tags"),
+                        }
                     },
-                    _ => panic!("Expected array schema for tags"),
+                    _ => panic!("Expected object schema"),
                 }
             },
-            _ => panic!("Expected object schema"),
+            _ => panic!("Expected schema"),
         }
-    }
 
-    // Verify response schema
-    if let Some(operation) = &path_item.post {
-        let schema = &operation.responses["200"]
+        // Verify response schema
+        let response_schema = &operation.responses.responses[&StatusCode::Code(200)]
             .content.as_ref().unwrap()["application/json"].schema;
         
-        match schema {
-            Schema::Object { properties, .. } => {
-                assert!(properties.contains_key("id"));
-                assert!(properties.contains_key("data"));
-                
-                match &properties["data"] {
-                    Schema::Object { properties, .. } => {
-                        assert!(properties.contains_key("value"));
-                        assert!(properties.contains_key("valid"));
+        match response_schema {
+            ReferenceOr::Item(Schema { schema_data: _, schema_kind }) => {
+                match schema_kind {
+                    SchemaKind::Type(Type::Object(obj)) => {
+                        // Check top-level response object properties
+                        assert!(obj.properties.contains_key("id"));
+                        assert!(obj.properties.contains_key("data"));
+                        
+                        // Check nested data object
+                        match &obj.properties["data"] {
+                            ReferenceOr::Item(Schema { schema_data: _, schema_kind: SchemaKind::Type(Type::Object(nested_obj)) }) => {
+                                assert!(nested_obj.properties.contains_key("value"));
+                                assert!(nested_obj.properties.contains_key("valid"));
+                                
+                                // Verify property types
+                                match &nested_obj.properties["value"] {
+                                    ReferenceOr::Item(Schema { schema_data: _, schema_kind: SchemaKind::Type(Type::Number(_)) }) => (),
+                                    _ => panic!("Expected number type for value"),
+                                }
+                                match &nested_obj.properties["valid"] {
+                                    ReferenceOr::Item(Schema { schema_data: _, schema_kind: SchemaKind::Type(Type::Boolean(_)) }) => (),
+                                    _ => panic!("Expected boolean type for valid"),
+                                }
+                            },
+                            _ => panic!("Expected object schema for data"),
+                        }
                     },
-                    _ => panic!("Expected object schema for data"),
+                    _ => panic!("Expected object schema"),
                 }
             },
-            _ => panic!("Expected object schema"),
+            _ => panic!("Expected schema"),
         }
     }
 }
@@ -140,9 +184,36 @@ fn test_path_parameters() {
     
     if let Some(parameters) = &path_item.parameters {
         assert_eq!(parameters.len(), 2);
-        assert_eq!(parameters[0].name, "id");
-        assert_eq!(parameters[1].name, "postId");
-        assert!(parameters.iter().all(|p| p.required == Some(true)));
+        
+        // Check first parameter
+        match &parameters[0] {
+            ReferenceOr::Item(Parameter::Path { parameter_data, .. }) => {
+                assert_eq!(parameter_data.name, "id");
+                assert_eq!(parameter_data.required, true);
+                match &parameter_data.format {
+                    ParameterSchemaOrContent::Schema(ReferenceOr::Item(Schema { schema_data: _, schema_kind })) => {
+                        assert!(matches!(schema_kind, SchemaKind::Type(Type::String(_))));
+                    },
+                    _ => panic!("Expected string schema for parameter"),
+                }
+            },
+            _ => panic!("Expected path parameter"),
+        }
+
+        // Check second parameter
+        match &parameters[1] {
+            ReferenceOr::Item(Parameter::Path { parameter_data, .. }) => {
+                assert_eq!(parameter_data.name, "postId");
+                assert_eq!(parameter_data.required, true);
+                match &parameter_data.format {
+                    ParameterSchemaOrContent::Schema(ReferenceOr::Item(Schema { schema_data: _, schema_kind })) => {
+                        assert!(matches!(schema_kind, SchemaKind::Type(Type::String(_))));
+                    },
+                    _ => panic!("Expected string schema for parameter"),
+                }
+            },
+            _ => panic!("Expected path parameter"),
+        }
     } else {
         panic!("Expected path parameters");
     }
@@ -170,12 +241,16 @@ fn test_cors_headers() {
     
     // Verify CORS options
     if let Some(options) = &path_item.options {
-        let response = &options.responses["200"];
-        let headers = response.headers.as_ref().unwrap();
-        
-        assert!(headers.contains_key("Access-Control-Allow-Origin"));
-        assert!(headers.contains_key("Access-Control-Allow-Methods"));
-        assert!(headers.contains_key("Access-Control-Allow-Headers"));
+        match &options.responses.responses[&StatusCode::Code(200)] {
+            ReferenceOr::Item(response) => {
+                let headers = response.headers.as_ref().unwrap();
+                
+                assert!(headers.contains_key("Access-Control-Allow-Origin"));
+                assert!(headers.contains_key("Access-Control-Allow-Methods"));
+                assert!(headers.contains_key("Access-Control-Allow-Headers"));
+            },
+            _ => panic!("Expected response"),
+        }
     } else {
         panic!("Expected OPTIONS operation");
     }
@@ -205,12 +280,21 @@ fn test_file_server_binding() {
     let path_item = spec.paths.get("/files/{path}").unwrap();
     
     if let Some(operation) = &path_item.get {
-        let response = &operation.responses["200"];
+        let response = &operation.responses.responses[&StatusCode::Code(200)];
         let content = response.content.as_ref().unwrap();
         assert!(content.contains_key("*/*"));
         
-        let schema = &content["*/*"].schema;
-        assert!(matches!(schema, Schema::String { format: Some(f), .. } if f == "binary"));
+        match &content["*/*"].schema {
+            ReferenceOr::Item(Schema { schema_data: _, schema_kind }) => {
+                match schema_kind {
+                    SchemaKind::Type(Type::String(string_type)) => {
+                        assert_eq!(string_type.format.as_deref(), Some("binary"));
+                    },
+                    _ => panic!("Expected string schema with binary format"),
+                }
+            },
+            _ => panic!("Expected schema"),
+        }
     } else {
         panic!("Expected GET operation");
     }
@@ -245,7 +329,12 @@ fn test_swagger_ui_binding() {
             operation.summary,
             Some("API Documentation".to_string())
         );
-        assert!(operation.responses.contains_key("200"));
+        match &operation.responses.responses[&StatusCode::Code(200)] {
+            ReferenceOr::Item(response) => {
+                assert!(response.content.is_some());
+            },
+            _ => panic!("Expected response"),
+        }
     } else {
         panic!("Expected GET operation for SwaggerUI");
     }
@@ -273,10 +362,21 @@ fn test_multi_segment_path_parameters() {
     
     if let Some(parameters) = &path_item.parameters {
         assert_eq!(parameters.len(), 1);
-        assert_eq!(parameters[0].name, "path");
-        assert!(parameters[0].required == Some(true));
-        // Multi-segment parameters should be documented in the description
-        assert!(parameters[0].description.as_ref().unwrap().contains("multi-segment"));
+        match &parameters[0] {
+            ReferenceOr::Item(Parameter::Path { parameter_data, .. }) => {
+                assert_eq!(parameter_data.name, "path");
+                assert_eq!(parameter_data.required, true);
+                assert!(parameter_data.description.as_ref().unwrap().contains("multi-segment"));
+                
+                match &parameter_data.format {
+                    ParameterSchemaOrContent::Schema(ReferenceOr::Item(Schema { schema_data: _, schema_kind })) => {
+                        assert!(matches!(schema_kind, SchemaKind::Type(Type::String(_))));
+                    },
+                    _ => panic!("Expected string schema for parameter"),
+                }
+            },
+            _ => panic!("Expected path parameter"),
+        }
     } else {
         panic!("Expected path parameters");
     }
