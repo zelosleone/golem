@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::model::plugin::{DefaultPluginOwner, PluginOwner};
-use crate::model::{AccountId, HasAccountId, PoemTypeRequirements};
+use crate::model::{AccountId, HasAccountId};
+use poem_openapi::types::Type;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Display};
 use std::str::FromStr;
@@ -27,7 +27,6 @@ pub trait ComponentOwner:
     + PartialEq
     + Serialize
     + for<'de> Deserialize<'de>
-    + PoemTypeRequirements
     + Send
     + Sync
     + 'static

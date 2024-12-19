@@ -12,23 +12,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::model::oplog::OplogIndex;
-use crate::model::{
-    AccountId, ComponentFilePath, ComponentFilePermissions, ComponentFileSystemNode,
-    ComponentFileSystemNodeDetails, ComponentType, FilterComparator, GatewayBindingType,
-    IdempotencyKey, InitialComponentFile, InitialComponentFileKey, LogLevel, NumberOfShards, Pod,
-    PromiseId, RoutingTable, RoutingTableEntry, ScanCursor, ShardId, StringFilterComparator,
-    TargetWorkerId, Timestamp, WorkerCreatedAtFilter, WorkerEnvFilter, WorkerEvent, WorkerFilter,
-    WorkerId, WorkerNameFilter, WorkerNotFilter, WorkerStatus, WorkerStatusFilter,
-    WorkerVersionFilter,
+use crate::model::{AccountId as ModelAccountId, ComponentFilePath, LogLevel};
+use golem_api_grpc::proto::golem::{
+    worker::WorkerId,
+    component::ComponentType,
+    common::FilterComparator,
 };
-use golem_api_grpc::proto::golem;
+use prost_types::Timestamp;
+use crate::uri::cloud::url::ResourceUrl;
+use serde::{Deserialize, Serialize};
+use golem_api_grpc::proto::golem::worker::{
+    WorkerFilter as GrpcWorkerFilter, FileSystemNode, IdempotencyKey as GrpcIdempotencyKey
+};
 use golem_api_grpc::proto::golem::shardmanager::{
-    Pod as GrpcPod, RoutingTable as GrpcRoutingTable, RoutingTableEntry as GrpcRoutingTableEntry,
+    Pod as GrpcPod, RoutingTable as GrpcRoutingTable, RoutingTableEntry as GrpcRoutingTableEntry, ShardId as GrpcShardId
 };
-use golem_api_grpc::proto::golem::worker::Cursor;
+use golem_api_grpc::proto::golem::common::{
+    StringFilterComparator as GrpcStringFilterComparator
+};
+use golem_api_grpc::proto::golem::component::{
+    ComponentFilePermissions as GrpcComponentFilePermissions,
+    InitialComponentFile as GrpcInitialComponentFile
+};
 use std::ops::Add;
 use std::time::{Duration, SystemTime};
+use poem_openapi::types::Type;
 
 impl From<Timestamp> for prost_types::Timestamp {
     fn from(value: Timestamp) -> Self {
@@ -73,25 +81,22 @@ impl TryFrom<golem_api_grpc::proto::golem::worker::WorkerId> for WorkerId {
     }
 }
 
-impl TryFrom<golem::worker::TargetWorkerId> for TargetWorkerId {
+impl TryFrom<golem_api_grpc::proto::golem::worker::TargetWorkerId> for TargetWorkerId {
     type Error = String;
 
-    fn try_from(value: golem::worker::TargetWorkerId) -> Result<Self, Self::Error> {
+    fn try_from(value: golem_api_grpc::proto::golem::worker::TargetWorkerId) -> Result<Self, Self::Error> {
         Ok(Self {
-            component_id: value
-                .component_id
-                .ok_or("Missing component_id")?
-                .try_into()?,
-            worker_name: value.name,
+            worker_id: value.worker_id,
+            oplog_idx: value.oplog_idx,
         })
     }
 }
 
-impl From<TargetWorkerId> for golem::worker::TargetWorkerId {
+impl From<TargetWorkerId> for golem_api_grpc::proto::golem::worker::TargetWorkerId {
     fn from(value: TargetWorkerId) -> Self {
         Self {
-            component_id: Some(value.component_id.into()),
-            name: value.worker_name,
+            worker_id: value.worker_id,
+            oplog_idx: value.oplog_idx,
         }
     }
 }
@@ -99,8 +104,7 @@ impl From<TargetWorkerId> for golem::worker::TargetWorkerId {
 impl From<PromiseId> for golem_api_grpc::proto::golem::worker::PromiseId {
     fn from(value: PromiseId) -> Self {
         Self {
-            worker_id: Some(value.worker_id.into()),
-            oplog_idx: value.oplog_idx.into(),
+            id: value.id,
         }
     }
 }
@@ -112,38 +116,31 @@ impl TryFrom<golem_api_grpc::proto::golem::worker::PromiseId> for PromiseId {
         value: golem_api_grpc::proto::golem::worker::PromiseId,
     ) -> Result<Self, Self::Error> {
         Ok(Self {
-            worker_id: value.worker_id.ok_or("Missing worker_id")?.try_into()?,
-            oplog_idx: OplogIndex::from_u64(value.oplog_idx),
+            id: value.id,
         })
     }
 }
 
-impl From<ShardId> for golem_api_grpc::proto::golem::shardmanager::ShardId {
-    fn from(value: ShardId) -> golem_api_grpc::proto::golem::shardmanager::ShardId {
-        golem_api_grpc::proto::golem::shardmanager::ShardId { value: value.value }
+impl From<ShardId> for GrpcShardId {
+    fn from(value: ShardId) -> Self {
+        Self {
+            id: value.id,
+        }
     }
 }
 
-impl From<golem_api_grpc::proto::golem::shardmanager::ShardId> for ShardId {
-    fn from(proto: golem_api_grpc::proto::golem::shardmanager::ShardId) -> Self {
-        Self { value: proto.value }
+impl From<GrpcShardId> for ShardId {
+    fn from(value: GrpcShardId) -> Self {
+        Self {
+            id: value.id,
+        }
     }
 }
 
 impl From<GrpcPod> for Pod {
     fn from(value: GrpcPod) -> Self {
         Self {
-            host: value.host,
-            port: value.port as u16,
-        }
-    }
-}
-
-impl From<GrpcRoutingTableEntry> for RoutingTableEntry {
-    fn from(value: GrpcRoutingTableEntry) -> Self {
-        Self {
-            shard_id: value.shard_id.unwrap().into(),
-            pod: value.pod.unwrap().into(),
+            id: value.id,
         }
     }
 }
@@ -151,28 +148,24 @@ impl From<GrpcRoutingTableEntry> for RoutingTableEntry {
 impl From<GrpcRoutingTable> for RoutingTable {
     fn from(value: GrpcRoutingTable) -> Self {
         Self {
-            number_of_shards: NumberOfShards {
-                value: value.number_of_shards as usize,
-            },
-            shard_assignments: value
-                .shard_assignments
-                .into_iter()
-                .map(RoutingTableEntry::from)
-                .map(|routing_table_entry| (routing_table_entry.shard_id, routing_table_entry.pod))
-                .collect(),
+            id: value.id,
         }
     }
 }
 
-impl From<golem_api_grpc::proto::golem::worker::IdempotencyKey> for IdempotencyKey {
-    fn from(proto: golem_api_grpc::proto::golem::worker::IdempotencyKey) -> Self {
-        Self { value: proto.value }
+impl TryFrom<golem_api_grpc::proto::golem::worker::IdempotencyKey> for ApiIdempotencyKey {
+    type Error = String;
+
+    fn try_from(key: golem_api_grpc::proto::golem::worker::IdempotencyKey) -> Result<Self, Self::Error> {
+        Ok(Self {
+            value: key.value,
+        })
     }
 }
 
-impl From<IdempotencyKey> for golem_api_grpc::proto::golem::worker::IdempotencyKey {
-    fn from(value: IdempotencyKey) -> Self {
-        Self { value: value.value }
+impl From<ApiIdempotencyKey> for golem_api_grpc::proto::golem::worker::IdempotencyKey {
+    fn from(value: ApiIdempotencyKey) -> Self {
+        value.0
     }
 }
 
@@ -181,12 +174,8 @@ impl From<WorkerStatus> for golem_api_grpc::proto::golem::worker::WorkerStatus {
         match value {
             WorkerStatus::Running => golem_api_grpc::proto::golem::worker::WorkerStatus::Running,
             WorkerStatus::Idle => golem_api_grpc::proto::golem::worker::WorkerStatus::Idle,
-            WorkerStatus::Suspended => {
-                golem_api_grpc::proto::golem::worker::WorkerStatus::Suspended
-            }
-            WorkerStatus::Interrupted => {
-                golem_api_grpc::proto::golem::worker::WorkerStatus::Interrupted
-            }
+            WorkerStatus::Suspended => golem_api_grpc::proto::golem::worker::WorkerStatus::Suspended,
+            WorkerStatus::Interrupted => golem_api_grpc::proto::golem::worker::WorkerStatus::Interrupted,
             WorkerStatus::Retrying => golem_api_grpc::proto::golem::worker::WorkerStatus::Retrying,
             WorkerStatus::Failed => golem_api_grpc::proto::golem::worker::WorkerStatus::Failed,
             WorkerStatus::Exited => golem_api_grpc::proto::golem::worker::WorkerStatus::Exited,
@@ -194,215 +183,55 @@ impl From<WorkerStatus> for golem_api_grpc::proto::golem::worker::WorkerStatus {
     }
 }
 
-impl From<golem_api_grpc::proto::golem::common::AccountId> for AccountId {
+impl From<golem_api_grpc::proto::golem::common::AccountId> for ModelAccountId {
     fn from(proto: golem_api_grpc::proto::golem::common::AccountId) -> Self {
         Self { value: proto.name }
     }
 }
 
-impl From<AccountId> for golem_api_grpc::proto::golem::common::AccountId {
-    fn from(value: AccountId) -> Self {
+impl From<ModelAccountId> for golem_api_grpc::proto::golem::common::AccountId {
+    fn from(value: ModelAccountId) -> Self {
         golem_api_grpc::proto::golem::common::AccountId { name: value.value }
     }
 }
 
-impl TryFrom<golem_api_grpc::proto::golem::worker::WorkerFilter> for WorkerFilter {
+#[derive(Debug, Clone)]
+pub struct WorkerFilterWrapper(pub GrpcWorkerFilter);
+
+impl From<WorkerFilterWrapper> for GrpcWorkerFilter {
+    fn from(filter: WorkerFilterWrapper) -> Self {
+        filter.0
+    }
+}
+
+impl TryFrom<GrpcWorkerFilter> for WorkerFilterWrapper {
     type Error = String;
 
-    fn try_from(
-        value: golem_api_grpc::proto::golem::worker::WorkerFilter,
-    ) -> Result<Self, Self::Error> {
-        match value.filter {
-            Some(filter) => match filter {
-                golem_api_grpc::proto::golem::worker::worker_filter::Filter::Name(filter) => Ok(
-                    WorkerFilter::new_name(filter.comparator.try_into()?, filter.value),
-                ),
-                golem_api_grpc::proto::golem::worker::worker_filter::Filter::Version(filter) => Ok(
-                    WorkerFilter::new_version(filter.comparator.try_into()?, filter.value),
-                ),
-                golem_api_grpc::proto::golem::worker::worker_filter::Filter::Status(filter) => {
-                    Ok(WorkerFilter::new_status(
-                        filter.comparator.try_into()?,
-                        filter.value.try_into()?,
-                    ))
-                }
-                golem_api_grpc::proto::golem::worker::worker_filter::Filter::CreatedAt(filter) => {
-                    let value = filter
-                        .value
-                        .map(|t| t.into())
-                        .ok_or_else(|| "Missing value".to_string())?;
-                    Ok(WorkerFilter::new_created_at(
-                        filter.comparator.try_into()?,
-                        value,
-                    ))
-                }
-                golem_api_grpc::proto::golem::worker::worker_filter::Filter::Env(filter) => Ok(
-                    WorkerFilter::new_env(filter.name, filter.comparator.try_into()?, filter.value),
-                ),
-                golem_api_grpc::proto::golem::worker::worker_filter::Filter::Not(filter) => {
-                    let filter = *filter.filter.ok_or_else(|| "Missing filter".to_string())?;
-                    Ok(WorkerFilter::new_not(filter.try_into()?))
-                }
-                golem_api_grpc::proto::golem::worker::worker_filter::Filter::And(
-                    golem_api_grpc::proto::golem::worker::WorkerAndFilter { filters },
-                ) => {
-                    let filters = filters.into_iter().map(|f| f.try_into()).collect::<Result<
-                        Vec<WorkerFilter>,
-                        String,
-                    >>(
-                    )?;
-
-                    Ok(WorkerFilter::new_and(filters))
-                }
-                golem_api_grpc::proto::golem::worker::worker_filter::Filter::Or(
-                    golem_api_grpc::proto::golem::worker::WorkerOrFilter { filters },
-                ) => {
-                    let filters = filters.into_iter().map(|f| f.try_into()).collect::<Result<
-                        Vec<WorkerFilter>,
-                        String,
-                    >>(
-                    )?;
-
-                    Ok(WorkerFilter::new_or(filters))
-                }
-            },
-            None => Err("Missing filter".to_string()),
-        }
+    fn try_from(filter: GrpcWorkerFilter) -> Result<Self, Self::Error> {
+        Ok(WorkerFilterWrapper(filter))
     }
 }
 
-impl From<WorkerFilter> for golem_api_grpc::proto::golem::worker::WorkerFilter {
-    fn from(value: WorkerFilter) -> Self {
-        let filter = match value {
-            WorkerFilter::Name(WorkerNameFilter { comparator, value }) => {
-                golem_api_grpc::proto::golem::worker::worker_filter::Filter::Name(
-                    golem_api_grpc::proto::golem::worker::WorkerNameFilter {
-                        comparator: comparator.into(),
-                        value,
-                    },
-                )
-            }
-            WorkerFilter::Version(WorkerVersionFilter { comparator, value }) => {
-                golem_api_grpc::proto::golem::worker::worker_filter::Filter::Version(
-                    golem_api_grpc::proto::golem::worker::WorkerVersionFilter {
-                        comparator: comparator.into(),
-                        value,
-                    },
-                )
-            }
-            WorkerFilter::Env(WorkerEnvFilter {
-                name,
-                comparator,
-                value,
-            }) => golem_api_grpc::proto::golem::worker::worker_filter::Filter::Env(
-                golem_api_grpc::proto::golem::worker::WorkerEnvFilter {
-                    name,
-                    comparator: comparator.into(),
-                    value,
-                },
-            ),
-            WorkerFilter::Status(WorkerStatusFilter { comparator, value }) => {
-                golem_api_grpc::proto::golem::worker::worker_filter::Filter::Status(
-                    golem_api_grpc::proto::golem::worker::WorkerStatusFilter {
-                        comparator: comparator.into(),
-                        value: value.into(),
-                    },
-                )
-            }
-            WorkerFilter::CreatedAt(WorkerCreatedAtFilter { comparator, value }) => {
-                golem_api_grpc::proto::golem::worker::worker_filter::Filter::CreatedAt(
-                    golem_api_grpc::proto::golem::worker::WorkerCreatedAtFilter {
-                        value: Some(value.into()),
-                        comparator: comparator.into(),
-                    },
-                )
-            }
-            WorkerFilter::Not(WorkerNotFilter { filter }) => {
-                let f: golem_api_grpc::proto::golem::worker::WorkerFilter = (*filter).into();
-                golem_api_grpc::proto::golem::worker::worker_filter::Filter::Not(Box::new(
-                    golem_api_grpc::proto::golem::worker::WorkerNotFilter {
-                        filter: Some(Box::new(f)),
-                    },
-                ))
-            }
-            WorkerFilter::And(filter) => {
-                golem_api_grpc::proto::golem::worker::worker_filter::Filter::And(
-                    golem_api_grpc::proto::golem::worker::WorkerAndFilter {
-                        filters: filter.filters.into_iter().map(|f| f.into()).collect(),
-                    },
-                )
-            }
-            WorkerFilter::Or(filter) => {
-                golem_api_grpc::proto::golem::worker::worker_filter::Filter::Or(
-                    golem_api_grpc::proto::golem::worker::WorkerOrFilter {
-                        filters: filter.filters.into_iter().map(|f| f.into()).collect(),
-                    },
-                )
-            }
-        };
-
-        golem_api_grpc::proto::golem::worker::WorkerFilter {
-            filter: Some(filter),
-        }
-    }
-}
-
-impl From<StringFilterComparator> for golem_api_grpc::proto::golem::common::StringFilterComparator {
+impl From<StringFilterComparator> for GrpcStringFilterComparator {
     fn from(value: StringFilterComparator) -> Self {
         match value {
-            StringFilterComparator::Equal => {
-                golem_api_grpc::proto::golem::common::StringFilterComparator::StringEqual
-            }
-            StringFilterComparator::NotEqual => {
-                golem_api_grpc::proto::golem::common::StringFilterComparator::StringNotEqual
-            }
-            StringFilterComparator::Like => {
-                golem_api_grpc::proto::golem::common::StringFilterComparator::StringLike
-            }
-            StringFilterComparator::NotLike => {
-                golem_api_grpc::proto::golem::common::StringFilterComparator::StringNotLike
-            }
+            StringFilterComparator::Equal => GrpcStringFilterComparator::StringEqual,
+            StringFilterComparator::NotEqual => GrpcStringFilterComparator::StringNotEqual,
+            StringFilterComparator::Like => GrpcStringFilterComparator::StringLike,
+            StringFilterComparator::NotLike => GrpcStringFilterComparator::StringNotLike,
         }
     }
 }
 
-impl From<FilterComparator> for golem_api_grpc::proto::golem::common::FilterComparator {
+impl From<FilterComparator> for GrpcFilterComparator {
     fn from(value: FilterComparator) -> Self {
         match value {
-            FilterComparator::Equal => {
-                golem_api_grpc::proto::golem::common::FilterComparator::Equal
-            }
-            FilterComparator::NotEqual => {
-                golem_api_grpc::proto::golem::common::FilterComparator::NotEqual
-            }
-            FilterComparator::Less => golem_api_grpc::proto::golem::common::FilterComparator::Less,
-            FilterComparator::LessEqual => {
-                golem_api_grpc::proto::golem::common::FilterComparator::LessEqual
-            }
-            FilterComparator::Greater => {
-                golem_api_grpc::proto::golem::common::FilterComparator::Greater
-            }
-            FilterComparator::GreaterEqual => {
-                golem_api_grpc::proto::golem::common::FilterComparator::GreaterEqual
-            }
-        }
-    }
-}
-
-impl From<Cursor> for ScanCursor {
-    fn from(value: Cursor) -> Self {
-        Self {
-            cursor: value.cursor,
-            layer: value.layer as usize,
-        }
-    }
-}
-
-impl From<ScanCursor> for Cursor {
-    fn from(value: ScanCursor) -> Self {
-        Self {
-            cursor: value.cursor,
-            layer: value.layer as u64,
+            FilterComparator::Equal => GrpcFilterComparator::Equal,
+            FilterComparator::NotEqual => GrpcFilterComparator::NotEqual,
+            FilterComparator::Less => GrpcFilterComparator::Less,
+            FilterComparator::LessEqual => GrpcFilterComparator::LessEqual,
+            FilterComparator::Greater => GrpcFilterComparator::Greater,
+            FilterComparator::GreaterEqual => GrpcFilterComparator::GreaterEqual,
         }
     }
 }
@@ -433,143 +262,12 @@ impl From<LogLevel> for golem_api_grpc::proto::golem::worker::Level {
     }
 }
 
-impl TryFrom<golem_api_grpc::proto::golem::worker::LogEvent> for WorkerEvent {
-    type Error = String;
-
-    fn try_from(
-        value: golem_api_grpc::proto::golem::worker::LogEvent,
-    ) -> Result<Self, Self::Error> {
-        match value.event {
-            Some(event) => match event {
-                golem_api_grpc::proto::golem::worker::log_event::Event::Stdout(event) => {
-                    Ok(WorkerEvent::StdOut {
-                        timestamp: event.timestamp.ok_or("Missing timestamp")?.into(),
-                        bytes: event.message.into_bytes(),
-                    })
-                }
-                golem_api_grpc::proto::golem::worker::log_event::Event::Stderr(event) => {
-                    Ok(WorkerEvent::StdErr {
-                        timestamp: event.timestamp.ok_or("Missing timestamp")?.into(),
-                        bytes: event.message.into_bytes(),
-                    })
-                }
-                golem_api_grpc::proto::golem::worker::log_event::Event::Log(event) => {
-                    Ok(WorkerEvent::Log {
-                        timestamp: event.timestamp.ok_or("Missing timestamp")?.into(),
-                        level: event.level().into(),
-                        context: event.context,
-                        message: event.message,
-                    })
-                }
-                golem_api_grpc::proto::golem::worker::log_event::Event::InvocationStarted(
-                    event,
-                ) => Ok(WorkerEvent::InvocationStart {
-                    timestamp: event.timestamp.ok_or("Missing timestamp")?.into(),
-                    function: event.function,
-                    idempotency_key: event
-                        .idempotency_key
-                        .ok_or("Missing idempotency key")?
-                        .into(),
-                }),
-                golem_api_grpc::proto::golem::worker::log_event::Event::InvocationFinished(
-                    event,
-                ) => Ok(WorkerEvent::InvocationFinished {
-                    timestamp: event.timestamp.ok_or("Missing timestamp")?.into(),
-                    function: event.function,
-                    idempotency_key: event
-                        .idempotency_key
-                        .ok_or("Missing idempotency key")?
-                        .into(),
-                }),
-            },
-            None => Err("Missing event".to_string()),
-        }
-    }
-}
-
-impl TryFrom<WorkerEvent> for golem_api_grpc::proto::golem::worker::LogEvent {
-    type Error = String;
-
-    fn try_from(value: WorkerEvent) -> Result<Self, Self::Error> {
-        match value {
-            WorkerEvent::StdOut { timestamp, bytes } => Ok(golem::worker::LogEvent {
-                event: Some(golem::worker::log_event::Event::Stdout(
-                    golem::worker::StdOutLog {
-                        message: String::from_utf8_lossy(&bytes).to_string(),
-                        timestamp: Some(timestamp.into()),
-                    },
-                )),
-            }),
-            WorkerEvent::StdErr { timestamp, bytes } => Ok(golem::worker::LogEvent {
-                event: Some(
-                    golem_api_grpc::proto::golem::worker::log_event::Event::Stderr(
-                        golem::worker::StdErrLog {
-                            message: String::from_utf8_lossy(&bytes).to_string(),
-                            timestamp: Some(timestamp.into()),
-                        },
-                    ),
-                ),
-            }),
-            WorkerEvent::Log {
-                timestamp,
-                level,
-                context,
-                message,
-            } => Ok(golem::worker::LogEvent {
-                event: Some(golem::worker::log_event::Event::Log(golem::worker::Log {
-                    level: match level {
-                        LogLevel::Trace => golem::worker::Level::Trace.into(),
-                        LogLevel::Debug => golem::worker::Level::Debug.into(),
-                        LogLevel::Info => golem::worker::Level::Info.into(),
-                        LogLevel::Warn => golem::worker::Level::Warn.into(),
-                        LogLevel::Error => golem::worker::Level::Error.into(),
-                        LogLevel::Critical => golem::worker::Level::Critical.into(),
-                    },
-                    context,
-                    message,
-                    timestamp: Some(timestamp.into()),
-                })),
-            }),
-            WorkerEvent::InvocationStart {
-                timestamp,
-                function,
-                idempotency_key,
-            } => Ok(golem::worker::LogEvent {
-                event: Some(golem::worker::log_event::Event::InvocationStarted(
-                    golem::worker::InvocationStarted {
-                        function,
-                        idempotency_key: Some(idempotency_key.into()),
-                        timestamp: Some(timestamp.into()),
-                    },
-                )),
-            }),
-            WorkerEvent::InvocationFinished {
-                timestamp,
-                function,
-                idempotency_key,
-            } => Ok(golem::worker::LogEvent {
-                event: Some(golem::worker::log_event::Event::InvocationFinished(
-                    golem::worker::InvocationFinished {
-                        function,
-                        idempotency_key: Some(idempotency_key.into()),
-                        timestamp: Some(timestamp.into()),
-                    },
-                )),
-            }),
-            WorkerEvent::Close => Err("Close event is not supported via protobuf".to_string()),
-        }
-    }
-}
-
 impl From<golem_api_grpc::proto::golem::component::ComponentType> for ComponentType {
     fn from(value: golem_api_grpc::proto::golem::component::ComponentType) -> Self {
         match value {
-            golem_api_grpc::proto::golem::component::ComponentType::Durable => {
-                ComponentType::Durable
-            }
-            golem_api_grpc::proto::golem::component::ComponentType::Ephemeral => {
-                ComponentType::Ephemeral
-            }
+            golem_api_grpc::proto::golem::component::ComponentType::Durable => ComponentType::Durable,
+            golem_api_grpc::proto::golem::component::ComponentType::Ephemeral => ComponentType::Ephemeral,
+            _ => ComponentType::Ephemeral,
         }
     }
 }
@@ -577,49 +275,85 @@ impl From<golem_api_grpc::proto::golem::component::ComponentType> for ComponentT
 impl From<ComponentType> for golem_api_grpc::proto::golem::component::ComponentType {
     fn from(value: ComponentType) -> Self {
         match value {
-            ComponentType::Durable => {
-                golem_api_grpc::proto::golem::component::ComponentType::Durable
-            }
-            ComponentType::Ephemeral => {
-                golem_api_grpc::proto::golem::component::ComponentType::Ephemeral
-            }
+            ComponentType::Durable => golem_api_grpc::proto::golem::component::ComponentType::Durable,
+            ComponentType::Ephemeral => golem_api_grpc::proto::golem::component::ComponentType::Ephemeral,
         }
     }
 }
 
-impl From<golem_api_grpc::proto::golem::component::ComponentFilePermissions>
-    for ComponentFilePermissions
-{
+impl From<golem_api_grpc::proto::golem::component::ComponentFilePermissions> for ComponentFilePermissions {
     fn from(value: golem_api_grpc::proto::golem::component::ComponentFilePermissions) -> Self {
         match value {
-            golem_api_grpc::proto::golem::component::ComponentFilePermissions::ReadOnly => {
-                ComponentFilePermissions::ReadOnly
-            }
-            golem_api_grpc::proto::golem::component::ComponentFilePermissions::ReadWrite => {
-                ComponentFilePermissions::ReadWrite
-            }
+            golem_api_grpc::proto::golem::component::ComponentFilePermissions::ReadOnly => ComponentFilePermissions::ReadOnly,
+            golem_api_grpc::proto::golem::component::ComponentFilePermissions::ReadWrite => ComponentFilePermissions::ReadWrite,
+            _ => ComponentFilePermissions::ReadOnly,
         }
     }
 }
 
-impl From<ComponentFilePermissions>
-    for golem_api_grpc::proto::golem::component::ComponentFilePermissions
-{
+impl From<ComponentFilePermissions> for golem_api_grpc::proto::golem::component::ComponentFilePermissions {
     fn from(value: ComponentFilePermissions) -> Self {
         match value {
-            ComponentFilePermissions::ReadOnly => {
-                golem_api_grpc::proto::golem::component::ComponentFilePermissions::ReadOnly
-            }
-            ComponentFilePermissions::ReadWrite => {
-                golem_api_grpc::proto::golem::component::ComponentFilePermissions::ReadWrite
-            }
+            ComponentFilePermissions::ReadOnly => golem_api_grpc::proto::golem::component::ComponentFilePermissions::ReadOnly,
+            ComponentFilePermissions::ReadWrite => golem_api_grpc::proto::golem::component::ComponentFilePermissions::ReadWrite,
         }
     }
 }
 
-impl From<InitialComponentFile> for golem_api_grpc::proto::golem::component::InitialComponentFile {
+impl From<golem_api_grpc::proto::golem::apidefinition::GatewayBindingType> for GatewayBindingType {
+    fn from(value: golem_api_grpc::proto::golem::apidefinition::GatewayBindingType) -> Self {
+        match value {
+            golem_api_grpc::proto::golem::apidefinition::GatewayBindingType::Default => GatewayBindingType::Default,
+            golem_api_grpc::proto::golem::apidefinition::GatewayBindingType::FileServer => GatewayBindingType::FileServer,
+            golem_api_grpc::proto::golem::apidefinition::GatewayBindingType::CorsPreflight => GatewayBindingType::CorsPreflight,
+            golem_api_grpc::proto::golem::apidefinition::GatewayBindingType::SwaggerUi => GatewayBindingType::SwaggerUi,
+            golem_api_grpc::proto::golem::apidefinition::GatewayBindingType::AuthCallback => GatewayBindingType::AuthCallback,
+            _ => GatewayBindingType::Default,
+        }
+    }
+}
+
+impl From<GatewayBindingType> for golem_api_grpc::proto::golem::apidefinition::GatewayBindingType {
+    fn from(value: GatewayBindingType) -> Self {
+        match value {
+            GatewayBindingType::Default => golem_api_grpc::proto::golem::apidefinition::GatewayBindingType::Default,
+            GatewayBindingType::FileServer => golem_api_grpc::proto::golem::apidefinition::GatewayBindingType::FileServer,
+            GatewayBindingType::CorsPreflight => golem_api_grpc::proto::golem::apidefinition::GatewayBindingType::CorsPreflight,
+            GatewayBindingType::SwaggerUi => golem_api_grpc::proto::golem::apidefinition::GatewayBindingType::SwaggerUi,
+            GatewayBindingType::AuthCallback => golem_api_grpc::proto::golem::apidefinition::GatewayBindingType::AuthCallback,
+        }
+    }
+}
+
+impl TryFrom<golem_api_grpc::proto::golem::worker::IndexedResourceMetadata> for IndexedResourceKey {
+    type Error = String;
+
+    fn try_from(metadata: golem_api_grpc::proto::golem::worker::IndexedResourceMetadata) -> Result<Self, Self::Error> {
+        Ok(Self {
+            resource_name: metadata.resource_name,
+            resource_params: metadata.resource_params,
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct IndexedResourceKey {
+    pub resource_name: String,
+    pub resource_params: Vec<String>,
+}
+
+impl From<IndexedResourceKey> for golem_api_grpc::proto::golem::worker::IndexedResourceMetadata {
+    fn from(key: IndexedResourceKey) -> Self {
+        Self {
+            resource_name: key.resource_name,
+            resource_params: key.resource_params,
+        }
+    }
+}
+
+impl From<InitialComponentFile> for GrpcInitialComponentFile {
     fn from(value: InitialComponentFile) -> Self {
-        let permissions: golem_api_grpc::proto::golem::component::ComponentFilePermissions =
+        let permissions: GrpcComponentFilePermissions =
             value.permissions.into();
         Self {
             key: value.key.0,
@@ -629,15 +363,13 @@ impl From<InitialComponentFile> for golem_api_grpc::proto::golem::component::Ini
     }
 }
 
-impl TryFrom<golem_api_grpc::proto::golem::component::InitialComponentFile>
-    for InitialComponentFile
-{
+impl TryFrom<GrpcInitialComponentFile> for InitialComponentFile {
     type Error = String;
 
     fn try_from(
-        value: golem_api_grpc::proto::golem::component::InitialComponentFile,
+        value: GrpcInitialComponentFile,
     ) -> Result<Self, Self::Error> {
-        let permissions: golem_api_grpc::proto::golem::component::ComponentFilePermissions = value
+        let permissions: GrpcComponentFilePermissions = value
             .permissions
             .try_into()
             .map_err(|e| format!("Failed converting permissions {e}"))?;
@@ -652,7 +384,7 @@ impl TryFrom<golem_api_grpc::proto::golem::component::InitialComponentFile>
     }
 }
 
-impl From<ComponentFileSystemNode> for golem_api_grpc::proto::golem::worker::FileSystemNode {
+impl From<ComponentFileSystemNode> for FileSystemNode {
     fn from(value: ComponentFileSystemNode) -> Self {
         let last_modified = value
             .last_modified
@@ -669,7 +401,7 @@ impl From<ComponentFileSystemNode> for golem_api_grpc::proto::golem::worker::Fil
                             last_modified,
                             size,
                             permissions:
-                            golem_api_grpc::proto::golem::component::ComponentFilePermissions::from(permissions).into(),
+                            GrpcComponentFilePermissions::from(permissions).into(),
                         }
                     ))
                 },
@@ -686,11 +418,11 @@ impl From<ComponentFileSystemNode> for golem_api_grpc::proto::golem::worker::Fil
     }
 }
 
-impl TryFrom<golem_api_grpc::proto::golem::worker::FileSystemNode> for ComponentFileSystemNode {
+impl TryFrom<FileSystemNode> for ComponentFileSystemNode {
     type Error = anyhow::Error;
 
     fn try_from(
-        value: golem_api_grpc::proto::golem::worker::FileSystemNode,
+        value: FileSystemNode,
     ) -> Result<Self, Self::Error> {
         match value.value {
             Some(golem_api_grpc::proto::golem::worker::file_system_node::Value::Directory(
@@ -715,7 +447,7 @@ impl TryFrom<golem_api_grpc::proto::golem::worker::FileSystemNode> for Component
                 last_modified: SystemTime::UNIX_EPOCH + Duration::from_secs(last_modified),
                 details: ComponentFileSystemNodeDetails::File {
                     permissions:
-                        golem_api_grpc::proto::golem::component::ComponentFilePermissions::try_from(
+                        GrpcComponentFilePermissions::try_from(
                             permissions,
                         )?
                         .into(),
@@ -727,37 +459,22 @@ impl TryFrom<golem_api_grpc::proto::golem::worker::FileSystemNode> for Component
     }
 }
 
-impl From<golem_api_grpc::proto::golem::apidefinition::GatewayBindingType> for GatewayBindingType {
-    fn from(value: golem_api_grpc::proto::golem::apidefinition::GatewayBindingType) -> Self {
-        match value {
-            golem_api_grpc::proto::golem::apidefinition::GatewayBindingType::Default => {
-                GatewayBindingType::Default
-            }
-            golem_api_grpc::proto::golem::apidefinition::GatewayBindingType::FileServer => {
-                GatewayBindingType::FileServer
-            }
-            golem_api_grpc::proto::golem::apidefinition::GatewayBindingType::CorsPreflight => {
-                GatewayBindingType::CorsPreflight
-            }
-            golem_api_grpc::proto::golem::apidefinition::GatewayBindingType::AuthCallBack => {
-                GatewayBindingType::CorsPreflight
-            }
-        }
+impl Type for ApiIdempotencyKey {
+    type RawElementValueType = String;
+    fn as_raw_value(&self) -> Option<&Self::RawValueType> {
+        Some(&self.value)
+    }
+    fn raw_element_iter(&self) -> Box<dyn Iterator<Item = &Self::RawElementValueType>> {
+        Box::new(std::iter::once(&self.value))
     }
 }
 
-impl From<GatewayBindingType> for golem_api_grpc::proto::golem::apidefinition::GatewayBindingType {
-    fn from(value: GatewayBindingType) -> Self {
-        match value {
-            GatewayBindingType::Default => {
-                golem_api_grpc::proto::golem::apidefinition::GatewayBindingType::Default
-            }
-            GatewayBindingType::FileServer => {
-                golem_api_grpc::proto::golem::apidefinition::GatewayBindingType::FileServer
-            }
-            GatewayBindingType::CorsPreflight => {
-                golem_api_grpc::proto::golem::apidefinition::GatewayBindingType::CorsPreflight
-            }
-        }
+impl Type for ApiWorkerId {
+    type RawElementValueType = String;
+    fn as_raw_value(&self) -> Option<&Self::RawValueType> {
+        Some(&self.0)
+    }
+    fn raw_element_iter(&self) -> Box<dyn Iterator<Item = &Self::RawElementValueType>> {
+        Box::new(std::iter::once(&self.0))
     }
 }

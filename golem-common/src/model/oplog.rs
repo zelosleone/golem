@@ -12,12 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::model::{AccountId, WorkerInvocation};
+use golem_api_grpc::proto::golem::{
+    common::PluginInstallationId,
+    worker::WorkerId,
+};
+use prost_types::Timestamp;
+use crate::uri::cloud::url::ResourceUrl;
+
 use crate::model::regions::OplogRegion;
 use crate::model::RetryConfig;
-use crate::model::{
-    AccountId, ComponentVersion, IdempotencyKey, PluginInstallationId, Timestamp, WorkerId,
-    WorkerInvocation,
-};
+use crate::model::{ComponentVersion,};
+use crate::model::snapshot::{ComponentSnapshot,};
+use golem_api_grpc::proto::golem::worker::IdempotencyKey;
 use bincode::de::read::Reader;
 use bincode::de::{BorrowDecoder, Decoder};
 use bincode::enc::write::Writer;
@@ -28,7 +35,7 @@ use golem_wasm_ast::analysis::analysed_type::{r#enum, u64};
 use golem_wasm_ast::analysis::AnalysedType;
 use golem_wasm_rpc::{IntoValue, Value};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
@@ -234,6 +241,32 @@ pub struct IndexedResourceKey {
     pub resource_params: Vec<String>,
 }
 
+#[cfg(feature = "protobuf")]
+mod protobuf {
+    use super::IndexedResourceKey;
+    use golem_api_grpc::proto::golem::worker::IndexedResourceMetadata;
+
+    impl From<IndexedResourceKey> for IndexedResourceMetadata {
+        fn from(key: IndexedResourceKey) -> Self {
+            IndexedResourceMetadata {
+                resource_name: key.resource_name,
+                resource_params: key.resource_params,
+            }
+        }
+    }
+
+    impl TryFrom<IndexedResourceMetadata> for IndexedResourceKey {
+        type Error = anyhow::Error;
+        
+        fn try_from(value: IndexedResourceMetadata) -> Result<Self, Self::Error> {
+            Ok(Self {
+                resource_name: value.resource_id.try_into()?,
+                resource_params: vec![value.index.try_into()?],
+            })
+        }
+    }
+}
+
 /// Worker log levels including the special stdout and stderr channels
 #[derive(Copy, Clone, Debug, PartialEq, Encode, Decode, Serialize, Deserialize)]
 #[cfg_attr(feature = "poem", derive(poem_openapi::Enum))]
@@ -270,18 +303,21 @@ impl IntoValue for LogLevel {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Encode, Decode)]
+#[derive(Debug, Clone)]
+pub enum UpdateType {
+    Automatic { target_version: ComponentVersion },
+    Custom { target_version: ComponentVersion, snapshot: ComponentSnapshot },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Encode, Decode)]
 pub enum OplogEntry {
     CreateV1 {
         timestamp: Timestamp,
         worker_id: WorkerId,
-        component_version: ComponentVersion,
-        args: Vec<String>,
-        env: Vec<(String, String)>,
-        account_id: AccountId,
-        parent: Option<WorkerId>,
-        component_size: u64,
-        initial_total_linear_memory_size: u64,
+        worker_version: ComponentVersion,
+        template_version: ComponentVersion,
+        env: HashMap<String, String>,
+        name: Option<String>,
     },
     /// The worker invoked a host function (original 1.0 version)
     ImportedFunctionInvokedV1 {
@@ -738,23 +774,19 @@ impl OplogEntry {
 }
 
 /// Describes a pending update
-#[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
+#[derive(Debug, Clone, PartialEq, Eq, Encode, Decode)]
 pub enum UpdateDescription {
-    /// Automatic update by replaying the oplog on the new version
+    /// Automatic update to a new version
     Automatic { target_version: ComponentVersion },
-
     /// Custom update by loading a given snapshot on the new version
-    SnapshotBased {
-        target_version: ComponentVersion,
-        payload: OplogPayload,
-    },
+    Custom { target_version: ComponentVersion, snapshot: ComponentSnapshot },
 }
 
 impl UpdateDescription {
     pub fn target_version(&self) -> &ComponentVersion {
         match self {
             UpdateDescription::Automatic { target_version } => target_version,
-            UpdateDescription::SnapshotBased { target_version, .. } => target_version,
+            UpdateDescription::Custom { target_version, .. } => target_version,
         }
     }
 }
@@ -820,29 +852,6 @@ impl WorkerError {
             WorkerError::InvalidRequest(message) => format!("{message}{error_logs}"),
             WorkerError::StackOverflow => format!("Stack overflow{error_logs}"),
             WorkerError::OutOfMemory => format!("Out of memory{error_logs}"),
-        }
-    }
-}
-
-#[cfg(feature = "protobuf")]
-mod protobuf {
-    use crate::model::oplog::IndexedResourceKey;
-
-    impl From<IndexedResourceKey> for golem_api_grpc::proto::golem::worker::IndexedResourceMetadata {
-        fn from(value: IndexedResourceKey) -> Self {
-            golem_api_grpc::proto::golem::worker::IndexedResourceMetadata {
-                resource_name: value.resource_name,
-                resource_params: value.resource_params,
-            }
-        }
-    }
-
-    impl From<golem_api_grpc::proto::golem::worker::IndexedResourceMetadata> for IndexedResourceKey {
-        fn from(value: golem_api_grpc::proto::golem::worker::IndexedResourceMetadata) -> Self {
-            IndexedResourceKey {
-                resource_name: value.resource_name,
-                resource_params: value.resource_params,
-            }
         }
     }
 }

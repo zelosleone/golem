@@ -1,0 +1,203 @@
+use golem_api_grpc::proto::golem::{
+    common,
+    worker,
+    component::ComponentId,
+};
+use poem_openapi::types::{ParseFromJSON, ParseFromParameter, ToJSON, Type};
+use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
+use std::str::FromStr;
+use uuid::Uuid;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApiIdempotencyKey {
+    pub value: String,
+}
+
+impl ApiIdempotencyKey {
+    pub fn fresh() -> Self {
+        Self {
+            value: Uuid::new_v4().to_string(),
+        }
+    }
+}
+
+impl From<worker::IdempotencyKey> for ApiIdempotencyKey {
+    fn from(id: worker::IdempotencyKey) -> Self {
+        Self { value: id.value }
+    }
+}
+
+impl From<ApiIdempotencyKey> for worker::IdempotencyKey {
+    fn from(id: ApiIdempotencyKey) -> Self {
+        worker::IdempotencyKey { value: id.value }
+    }
+}
+
+impl Type for ApiIdempotencyKey {
+    const IS_REQUIRED: bool = true;
+    type RawValueType = String;
+    type RawElementValueType = String;
+
+    fn name() -> std::borrow::Cow<'static, str> {
+        "ApiIdempotencyKey".into()
+    }
+
+    fn schema_ref() -> poem_openapi::registry::MetaSchemaRef {
+        String::schema_ref()
+    }
+
+    fn as_raw_value(&self) -> Option<&Self::RawValueType> {
+        Some(&self.value)
+    }
+
+    fn raw_element_iter(&self) -> Box<dyn Iterator<Item = &Self::RawElementValueType>> {
+        Box::new(std::iter::once(&self.value))
+    }
+}
+
+impl ParseFromJSON for ApiIdempotencyKey {
+    fn parse_from_json(value: Option<JsonValue>) -> poem_openapi::types::ParseResult<Self> {
+        let value = value.ok_or_else(|| poem_openapi::types::ParseError::expected_input())?;
+        let value = String::parse_from_json(Some(value))?;
+        Ok(Self { value })
+    }
+}
+
+impl ToJSON for ApiIdempotencyKey {
+    fn to_json(&self) -> Option<JsonValue> {
+        Some(JsonValue::String(self.value.clone()))
+    }
+}
+
+impl ParseFromParameter for ApiIdempotencyKey {
+    fn parse_from_parameter(value: &str) -> poem_openapi::types::ParseResult<Self> {
+        Ok(Self { value: value.to_string() })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApiWorkerId {
+    pub value: String,
+}
+
+impl From<worker::WorkerId> for ApiWorkerId {
+    fn from(id: worker::WorkerId) -> Self {
+        Self { value: format!("{}/{}", id.component_id.unwrap().value, id.name) }
+    }
+}
+
+impl From<ApiWorkerId> for worker::WorkerId {
+    fn from(id: ApiWorkerId) -> Self {
+        let parts: Vec<&str> = id.value.split('/').collect();
+        worker::WorkerId {
+            component_id: Some(ComponentId { value: parts[0].to_string() }),
+            name: parts[1].to_string(),
+        }
+    }
+}
+
+impl Type for ApiWorkerId {
+    const IS_REQUIRED: bool = true;
+    type RawValueType = String;
+    type RawElementValueType = String;
+
+    fn name() -> std::borrow::Cow<'static, str> {
+        "ApiWorkerId".into()
+    }
+
+    fn schema_ref() -> poem_openapi::registry::MetaSchemaRef {
+        String::schema_ref()
+    }
+
+    fn as_raw_value(&self) -> Option<&Self::RawValueType> {
+        Some(&self.value)
+    }
+
+    fn raw_element_iter(&self) -> Box<dyn Iterator<Item = &Self::RawElementValueType>> {
+        Box::new(std::iter::once(&self.value))
+    }
+}
+
+impl ParseFromJSON for ApiWorkerId {
+    fn parse_from_json(value: Option<JsonValue>) -> poem_openapi::types::ParseResult<Self> {
+        let value = value.ok_or_else(|| poem_openapi::types::ParseError::expected_input())?;
+        let value = String::parse_from_json(Some(value))?;
+        Ok(Self { value })
+    }
+}
+
+impl ToJSON for ApiWorkerId {
+    fn to_json(&self) -> Option<JsonValue> {
+        Some(JsonValue::String(self.value.clone()))
+    }
+}
+
+impl ParseFromParameter for ApiWorkerId {
+    fn parse_from_parameter(value: &str) -> poem_openapi::types::ParseResult<Self> {
+        Ok(Self { value: value.to_string() })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApiAccountId {
+    pub value: String,
+}
+
+impl From<common::AccountId> for ApiAccountId {
+    fn from(id: common::AccountId) -> Self {
+        Self { value: id.value }
+    }
+}
+
+impl From<ApiAccountId> for common::AccountId {
+    fn from(id: ApiAccountId) -> Self {
+        common::AccountId { value: id.value }
+    }
+}
+
+// Implement OpenAPI traits for wrapper types
+impl Type for ApiAccountId {
+    const IS_REQUIRED: bool = true;
+    type RawValueType = Self;
+    type RawElementValueType = String;
+
+    fn name() -> std::borrow::Cow<'static, str> {
+        "AccountId".into()
+    }
+
+    fn schema_ref() -> poem_openapi::registry::MetaSchemaRef {
+        String::schema_ref()
+    }
+
+    fn as_raw_value(&self) -> Option<&Self::RawValueType> {
+        Some(self)
+    }
+
+    fn raw_element_iter(&self) -> Box<dyn Iterator<Item = &Self::RawElementValueType> + '_> {
+        Box::new(std::iter::once(&self.value))
+    }
+}
+
+impl ParseFromParameter for ApiAccountId {
+    fn parse_from_parameter(value: &str) -> poem_openapi::types::ParseResult<Self> {
+        Ok(Self { value: value.to_string() })
+    }
+}
+
+impl ParseFromJSON for ApiAccountId {
+    fn parse_from_json(value: Option<serde_json::Value>) -> poem_openapi::types::ParseResult<Self> {
+        if let Some(value) = value {
+            if let Ok(s) = serde_json::from_value::<String>(value) {
+                return Ok(Self { value: s });
+            }
+        }
+        Err(poem_openapi::types::ParseError::expected_type(value))
+    }
+}
+
+impl ToJSON for ApiAccountId {
+    fn to_json(&self) -> Option<serde_json::Value> {
+        Some(serde_json::Value::String(self.value.clone()))
+    }
+}
