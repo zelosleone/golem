@@ -190,8 +190,6 @@ pub(crate) fn validate_operation_types(operation: &Operation) -> Result<(), Open
 }
 
 fn validate_parameter_schema(schema: &OpenAPISchema) -> Result<(), OpenAPIError> {
-    match schema {
-fn validate_parameter_schema(schema: &OpenAPISchema) -> Result<(), OpenAPIError> {
     match &schema.schema_kind {
         SchemaKind::Type(t) => {
             match t {
