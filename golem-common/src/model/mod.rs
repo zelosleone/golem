@@ -12,31 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::newtype_uuid;
-use crate::uri::oss::urn::WorkerUrn;
-use bincode::{BorrowDecode, Decode, Encode};
-use bincode::de::{BorrowDecoder, Decoder};
-use bincode::enc::Encoder;
-use bincode::error::{DecodeError, EncodeError};
-use golem_wasm_ast::analysis::{AnalysedType, protobuf::ast};
+use bincode::{Decode, Encode};
+use golem_wasm_ast::analysis::AnalysedType;
 use golem_wasm_rpc::IntoValue;
-use golem_api_grpc::proto::golem::worker::{PromiseId as GrpcPromiseId, IdempotencyKey};
-use golem_api_grpc::proto::golem::shardmanager::{ShardId as GrpcShardId, RoutingTableEntry as GrpcRoutingTableEntry};
+use golem_api_grpc::proto::golem::worker::{PromiseId as GrpcPromiseId, IdempotencyKey as GrpcIdempotencyKey, TargetWorkerId};
+use golem_api_grpc::proto::golem::shardmanager::{Pod, RoutingTable, RoutingTableEntry as GrpcRoutingTableEntry, ShardId as GrpcShardId};
 use golem_api_grpc::proto::golem::common::StringFilterComparator as GrpcStringFilterComparator;
-use http::Uri;
 use poem_openapi::types::Type;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use serde::de::{self, Unexpected, Visitor};
-use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet, VecDeque};
+use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
-use std::hash::Hash;
-use std::str::{self, FromStr};
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, SystemTime};
 use typed_path::Utf8UnixPathBuf;
-use url::Url;
-use uuid::{uuid, Uuid};
+use uuid::Uuid;
 
+use crate::newtype_uuid;
+use crate::uri::oss::urn::WorkerUrn;
 use crate::model::protobuf::IndexedResourceKey;
 
 pub mod api_types;
@@ -55,329 +46,6 @@ pub use protobuf::*;
 pub use regions::*;
 pub use snapshot::*;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct PromiseId {
-    pub worker_id: WorkerId,
-    pub oplog_idx: OplogIndex,
-}
-
-impl Display for PromiseId {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}:{}", self.worker_id, self.oplog_idx)
-    }
-}
-
-impl From<GrpcPromiseId> for PromiseId {
-    fn from(grpc_id: GrpcPromiseId) -> Self {
-        PromiseId(grpc_id)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Encode, Decode)]
-pub enum StringFilterComparator {
-    Equal,
-    NotEqual,
-    Like,
-    NotLike,
-}
-
-impl Display for StringFilterComparator {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            StringFilterComparator::Equal => write!(f, "Equal"),
-            StringFilterComparator::NotEqual => write!(f, "NotEqual"),
-            StringFilterComparator::Like => write!(f, "Like"),
-            StringFilterComparator::NotLike => write!(f, "NotLike"),
-        }
-    }
-}
-
-impl From<GrpcStringFilterComparator> for StringFilterComparator {
-    fn from(grpc_comparator: GrpcStringFilterComparator) -> Self {
-        match grpc_comparator {
-            GrpcStringFilterComparator::Equal => StringFilterComparator::Equal,
-            GrpcStringFilterComparator::NotEqual => StringFilterComparator::NotEqual,
-            GrpcStringFilterComparator::Like => StringFilterComparator::Like,
-            GrpcStringFilterComparator::NotLike => StringFilterComparator::NotLike,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RoutingTableEntry {
-    pub worker_id: String,
-    pub shard_id: ShardId,
-    pub last_seen: SystemTime,
-}
-
-impl From<GrpcRoutingTableEntry> for RoutingTableEntry {
-    fn from(grpc_entry: GrpcRoutingTableEntry) -> Self {
-        RoutingTableEntry {
-            worker_id: grpc_entry.worker_id,
-            shard_id: grpc_entry.shard_id.unwrap_or_default(),
-            last_seen: grpc_entry.last_seen
-                .map(|t| SystemTime::UNIX_EPOCH + Duration::from_secs(t as u64))
-                .unwrap_or_else(SystemTime::now),
-        }
-    }
-}
-#[cfg(feature = "poem")]
-pub trait PoemTypeRequirements:
-    poem_openapi::types::Type + poem_openapi::types::ParseFromJSON + poem_openapi::types::ToJSON
-{
-}
-
-#[cfg(not(feature = "poem"))]
-pub trait PoemTypeRequirements {}
-
-#[cfg(feature = "poem")]
-impl<
-        T: poem_openapi::types::Type
-            + poem_openapi::types::ParseFromJSON
-            + poem_openapi::types::ToJSON,
-    > PoemTypeRequirements for T
-{
-}
-
-#[cfg(not(feature = "poem"))]
-impl<T> PoemTypeRequirements for T {}
-
-newtype_uuid!(
-    ComponentId,
-    golem_api_grpc::proto::golem::component::ComponentId
-);
-
-newtype_uuid!(
-    ProjectId,
-    golem_api_grpc::proto::golem::common::ProjectId
-);
-
-newtype_uuid!(
-    PluginInstallationId,
-    golem_api_grpc::proto::golem::common::PluginInstallationId
-);
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-#[repr(transparent)]
-pub struct Timestamp(iso8601_timestamp::Timestamp);
-
-impl Timestamp {
-    pub fn now_utc() -> Timestamp {
-        Timestamp(iso8601_timestamp::Timestamp::now_utc())
-    }
-
-    pub fn to_millis(&self) -> u64 {
-        self.0
-            .duration_since(iso8601_timestamp::Timestamp::UNIX_EPOCH)
-            .whole_milliseconds() as u64
-    }
-}
-
-impl Display for Timestamp {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl FromStr for Timestamp {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match iso8601_timestamp::Timestamp::parse(s) {
-            Some(ts) => Ok(Self(ts)),
-            None => Err("Invalid timestamp".to_string()),
-        }
-    }
-}
-
-impl serde::Serialize for Timestamp {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        self.0.serialize(serializer)
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for Timestamp {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        if deserializer.is_human_readable() {
-            iso8601_timestamp::Timestamp::deserialize(deserializer).map(Self)
-        } else {
-            // For non-human-readable formats we assume it was an i64 representing milliseconds from epoch
-            let timestamp = i64::deserialize(deserializer)?;
-            Ok(Timestamp(
-                iso8601_timestamp::Timestamp::UNIX_EPOCH
-                    .add(Duration::from_millis(timestamp as u64)),
-            ))
-        }
-    }
-}
-
-impl bincode::Encode for Timestamp {
-    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
-        (self
-            .0
-            .duration_since(iso8601_timestamp::Timestamp::UNIX_EPOCH)
-            .whole_milliseconds() as i64)
-            .encode(encoder)
-    }
-}
-
-impl bincode::Decode for Timestamp {
-    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
-        let timestamp: i64 = bincode::Decode::decode(decoder)?;
-        Ok(Timestamp(
-            iso8601_timestamp::Timestamp::UNIX_EPOCH.add(Duration::from_millis(timestamp as u64)),
-        ))
-    }
-}
-
-impl<'de> bincode::BorrowDecode<'de> for Timestamp {
-    fn borrow_decode<D: BorrowDecoder<'de>>(decoder: &mut D) -> Result<Self, DecodeError> {
-        let timestamp: i64 = bincode::BorrowDecode::borrow_decode(decoder)?;
-        Ok(Timestamp(
-            iso8601_timestamp::Timestamp::UNIX_EPOCH.add(Duration::from_millis(timestamp as u64)),
-        ))
-    }
-}
-
-impl From<u64> for Timestamp {
-    fn from(value: u64) -> Self {
-        Timestamp(iso8601_timestamp::Timestamp::UNIX_EPOCH.add(Duration::from_millis(value)))
-    }
-}
-
-impl IntoValue for Timestamp {
-    fn into_value(self) -> golem_wasm_rpc::Value {
-        golem_wasm_rpc::Value::Record(vec![
-            ("seconds".to_string(), self.0.duration_since(Timestamp::UNIX_EPOCH).whole_seconds().into()),
-            ("nanoseconds".to_string(), self.0.duration_since(Timestamp::UNIX_EPOCH).subsec_nanoseconds().into()),
-        ])
-    }
-
-    fn get_type() -> AnalysedType {
-        ast::record(vec![ast::field("seconds", ast::wasm_u64()), ast::field("nanoseconds", ast::wasm_u32())])
-    }
-}
-
-pub type ComponentVersion = u64;
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Encode, Decode, Serialize, Deserialize)]
-#[cfg_attr(feature = "poem", derive(poem_openapi::Object))]
-#[cfg_attr(feature = "poem", oai(rename_all = "camelCase"))]
-#[serde(rename_all = "camelCase")]
-pub struct WorkerId {
-    pub component_id: ComponentId,
-    pub worker_name: String,
-}
-
-impl WorkerId {
-    pub fn to_redis_key(&self) -> String {
-        format!("{}:{}", self.component_id.0, self.worker_name)
-    }
-
-    pub fn uri(&self) -> String {
-        WorkerUrn {
-            id: self.clone().into_target_worker_id(),
-        }
-        .to_string()
-    }
-
-    /// The dual of `TargetWorkerId::into_worker_id`
-    pub fn into_target_worker_id(self) -> TargetWorkerId {
-        TargetWorkerId {
-            component_id: self.component_id,
-            worker_name: Some(self.worker_name),
-        }
-    }
-}
-
-impl FromStr for WorkerId {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let parts: Vec<&str> = s.split(':').collect();
-        if parts.len() == 2 {
-            let component_id_uuid = Uuid::from_str(parts[0])
-                .map_err(|_| format!("invalid component id: {s} - expected uuid"))?;
-            let component_id = ComponentId(component_id_uuid);
-            let worker_name = parts[1].to_string();
-            Ok(Self {
-                component_id,
-                worker_name,
-            })
-        } else {
-            Err(format!(
-                "invalid worker id: {s} - expected format: <component_id>:<worker_name>"
-            ))
-        }
-    }
-}
-
-impl Display for WorkerId {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&format!("{}/{}", self.component_id, self.worker_name))
-    }
-}
-
-impl IntoValue for WorkerId {
-    fn into_value(self) -> golem_wasm_rpc::Value {
-        golem_wasm_rpc::Value::Record(vec![
-            self.component_id.into_value(),
-            self.worker_name.into_value(),
-        ])
-    }
-
-    fn get_type() -> AnalysedType {
-        ast::record(vec![
-            ast::field("component_id", ComponentId::get_type()),
-            ast::field("worker_name", std::string::String::get_type()),
-        ])
-    }
-}
-
-/// Associates a worker-id with its owner account
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct OwnedWorkerId {
-    pub account_id: AccountId,
-    pub worker_id: WorkerId,
-}
-
-impl OwnedWorkerId {
-    pub fn new(account_id: &AccountId, worker_id: &WorkerId) -> Self {
-        Self {
-            account_id: account_id.clone(),
-            worker_id: worker_id.clone(),
-        }
-    }
-
-    pub fn worker_id(&self) -> WorkerId {
-        self.worker_id.clone()
-    }
-
-    pub fn account_id(&self) -> AccountId {
-        self.account_id.clone()
-    }
-
-    pub fn component_id(&self) -> ComponentId {
-        self.worker_id.component_id.clone()
-    }
-
-    pub fn worker_name(&self) -> String {
-        self.worker_id.worker_name.clone()
-    }
-}
-
-impl Display for OwnedWorkerId {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}/{}", self.account_id, self.worker_id)
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Encode, Decode, Serialize, Deserialize)]
 pub struct PromiseId {
     pub worker_id: WorkerId,
@@ -385,8 +53,26 @@ pub struct PromiseId {
 }
 
 impl Display for PromiseId {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}:{}", self.worker_id, self.oplog_idx)
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}@{}", self.worker_id, self.oplog_idx)
+    }
+}
+
+impl From<GrpcPromiseId> for PromiseId {
+    fn from(promise_id: GrpcPromiseId) -> Self {
+        PromiseId {
+            worker_id: WorkerId::from(promise_id.worker_id.unwrap()),
+            oplog_idx: OplogIndex(promise_id.oplog_idx),
+        }
+    }
+}
+
+impl From<PromiseId> for GrpcPromiseId {
+    fn from(promise_id: PromiseId) -> Self {
+        GrpcPromiseId {
+            worker_id: Some(promise_id.worker_id.into()),
+            oplog_idx: promise_id.oplog_idx.0,
+        }
     }
 }
 
@@ -827,34 +513,45 @@ impl IntoValue for WorkerStatus {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
-pub enum WorkerInvocation {
-    ExportedFunction {
-        idempotency_key: IdempotencyKey,
-        full_function_name: String,
-        function_input: Vec<golem_wasm_rpc::Value>,
-    },
-    ManualUpdate {
-        target_version: ComponentVersion,
-    },
+pub struct IdempotencyKey {
+    pub value: String,
+}
+
+impl Encode for IdempotencyKey {
+    fn encode<E: bincode::enc::Encoder>(&self, encoder: &mut E) -> Result<(), bincode::error::EncodeError> {
+        self.value.encode(encoder)
+    }
+}
+
+impl Decode for IdempotencyKey {
+    fn decode<D: bincode::de::Decoder>(decoder: &mut D) -> Result<Self, bincode::error::DecodeError> {
+        let value = String::decode(decoder)?;
+        Ok(IdempotencyKey { value })
+    }
+}
+
+impl Display for IdempotencyKey {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.value)
+    }
+}
+
+impl Eq for IdempotencyKey {}
+
+#[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
+pub struct WorkerInvocation {
+    pub idempotency_key: IdempotencyKey,
+    pub full_function_name: String,
+    pub function_input: Vec<golem_wasm_rpc::Value>,
 }
 
 impl WorkerInvocation {
     pub fn is_idempotency_key(&self, key: &IdempotencyKey) -> bool {
-        match self {
-            Self::ExportedFunction {
-                idempotency_key, ..
-            } => idempotency_key == key,
-            _ => false,
-        }
+        &self.idempotency_key == key
     }
 
-    pub fn idempotency_key(&self) -> Option<&IdempotencyKey> {
-        match self {
-            Self::ExportedFunction {
-                idempotency_key, ..
-            } => Some(idempotency_key),
-            _ => None,
-        }
+    pub fn idempotency_key(&self) -> &IdempotencyKey {
+        &self.idempotency_key
     }
 }
 
@@ -925,131 +622,49 @@ pub trait HasAccountId {
     fn account_id(&self) -> AccountId;
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Encode, Decode)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Encode, Decode)]
 #[cfg_attr(feature = "poem", derive(poem_openapi::Enum))]
-pub enum FilterComparator {
+pub enum StringFilterComparator {
     Equal,
     NotEqual,
-    GreaterEqual,
-    Greater,
-    LessEqual,
-    Less,
+    Like,
+    NotLike,
 }
 
-impl Display for FilterComparator {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let s = match self {
-            FilterComparator::Equal => "==",
-            FilterComparator::NotEqual => "!=",
-            FilterComparator::GreaterEqual => ">=",
-            FilterComparator::Greater => ">",
-            FilterComparator::LessEqual => "<=",
-            FilterComparator::Less => "<",
-        };
-        write!(f, "{}", s)
-    }
-}
-
-impl FilterComparator {
-    pub fn matches<T: Ord>(&self, value1: &T, value2: &T) -> bool {
+impl Display for StringFilterComparator {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            FilterComparator::Equal => value1 == value2,
-            FilterComparator::NotEqual => value1 != value2,
-            FilterComparator::Less => value1 < value2,
-            FilterComparator::LessEqual => value1 <= value2,
-            FilterComparator::Greater => value1 > value2,
-            FilterComparator::GreaterEqual => value1 >= value2,
+            StringFilterComparator::Equal => write!(f, "Equal"),
+            StringFilterComparator::NotEqual => write!(f, "NotEqual"),
+            StringFilterComparator::Like => write!(f, "Like"),
+            StringFilterComparator::NotLike => write!(f, "NotLike"),
         }
     }
 }
 
-impl FromStr for FilterComparator {
-    type Err = String;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "==" | "=" | "equal" | "eq" => Ok(FilterComparator::Equal),
-            "!=" | "notequal" | "ne" => Ok(FilterComparator::NotEqual),
-            ">=" | "greaterequal" | "ge" => Ok(FilterComparator::GreaterEqual),
-            ">" | "greater" | "gt" => Ok(FilterComparator::Greater),
-            "<=" | "lessequal" | "le" => Ok(FilterComparator::LessEqual),
-            "<" | "less" | "lt" => Ok(FilterComparator::Less),
-            _ => Err(format!("Unknown Filter Comparator: {}", s)),
+impl From<GrpcStringFilterComparator> for StringFilterComparator {
+    fn from(grpc_comparator: GrpcStringFilterComparator) -> Self {
+        match grpc_comparator {
+            GrpcStringFilterComparator::Equal => StringFilterComparator::Equal,
+            GrpcStringFilterComparator::NotEqual => StringFilterComparator::NotEqual,
+            GrpcStringFilterComparator::Like => StringFilterComparator::Like,
+            GrpcStringFilterComparator::NotLike => StringFilterComparator::NotLike,
         }
     }
 }
 
-impl TryFrom<i32> for FilterComparator {
-    type Error = String;
-
-    fn try_from(value: i32) -> Result<Self, Self::Error> {
-        match value {
-            0 => Ok(FilterComparator::Equal),
-            1 => Ok(FilterComparator::NotEqual),
-            2 => Ok(FilterComparator::Less),
-            3 => Ok(FilterComparator::LessEqual),
-            4 => Ok(FilterComparator::Greater),
-            5 => Ok(FilterComparator::GreaterEqual),
-            _ => Err(format!("Unknown Filter Comparator: {}", value)),
+impl From<StringFilterComparator> for GrpcStringFilterComparator {
+    fn from(comparator: StringFilterComparator) -> Self {
+        match comparator {
+            StringFilterComparator::Equal => GrpcStringFilterComparator::Equal,
+            StringFilterComparator::NotEqual => GrpcStringFilterComparator::NotEqual,
+            StringFilterComparator::Like => GrpcStringFilterComparator::Like,
+            StringFilterComparator::NotLike => GrpcStringFilterComparator::NotLike,
         }
     }
 }
 
-impl From<FilterComparator> for i32 {
-    fn from(value: FilterComparator) -> Self {
-        match value {
-            FilterComparator::Equal => 0,
-            FilterComparator::NotEqual => 1,
-            FilterComparator::Less => 2,
-            FilterComparator::LessEqual => 3,
-            FilterComparator::Greater => 4,
-            FilterComparator::GreaterEqual => 5,
-        }
-    }
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "poem", derive(poem_openapi::Enum))]
-#[repr(i32)]
-pub enum ComponentType {
-    Durable = 0,
-    Ephemeral = 1,
-}
-
-impl TryFrom<i32> for ComponentType {
-    type Error = String;
-
-    fn try_from(value: i32) -> Result<Self, Self::Error> {
-        match value {
-            0 => Ok(ComponentType::Durable),
-            1 => Ok(ComponentType::Ephemeral),
-            _ => Err(format!("Unknown Component Type: {}", value)),
-        }
-    }
-}
-
-impl Display for ComponentType {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let s = match self {
-            ComponentType::Durable => "Durable",
-            ComponentType::Ephemeral => "Ephemeral",
-        };
-        write!(f, "{}", s)
-    }
-}
-
-impl FromStr for ComponentType {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "Durable" => Ok(ComponentType::Durable),
-            "Ephemeral" => Ok(ComponentType::Ephemeral),
-            _ => Err(format!("Unknown Component Type: {}", s)),
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "poem", derive(poem_openapi::Object))]
 #[cfg_attr(feature = "poem", oai(rename_all = "camelCase"))]
 #[serde(rename_all = "camelCase")]
@@ -1135,23 +750,7 @@ impl<'de> Deserialize<'de> for ComponentFilePath {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub enum ComponentFileSystemNodeDetails {
-    File {
-        permissions: ComponentFilePermissions,
-        size: u64,
-    },
-    Directory,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct ComponentFileSystemNode {
-    pub name: String,
-    pub last_modified: SystemTime,
-    pub details: ComponentFileSystemNodeDetails,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Encode, Decode, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "poem", derive(poem_openapi::Enum))]
 #[serde(rename_all = "kebab-case")]
 #[cfg_attr(feature = "poem", oai(rename_all = "kebab-case"))]
@@ -1201,65 +800,45 @@ impl fmt::Display for GatewayBindingType {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ComponentFilePermissions {
+    ReadOnly,
+    ReadWrite,
+}
+
+impl From<ComponentFilePermissions> for golem_api_grpc::proto::golem::component::ComponentFilePermissions {
+    fn from(value: ComponentFilePermissions) -> Self {
+        match value {
+            ComponentFilePermissions::ReadOnly => Self::ReadOnly,
+            ComponentFilePermissions::ReadWrite => Self::ReadWrite,
+        }
+    }
+}
+
+impl From<golem_api_grpc::proto::golem::component::ComponentFilePermissions> for ComponentFilePermissions {
+    fn from(value: golem_api_grpc::proto::golem::component::ComponentFilePermissions) -> Self {
+        match value {
+            golem_api_grpc::proto::golem::component::ComponentFilePermissions::ReadOnly => Self::ReadOnly,
+            golem_api_grpc::proto::golem::component::ComponentFilePermissions::ReadWrite => Self::ReadWrite,
+            _ => Self::ReadOnly,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
-pub struct ComponentFilePermissions {
-    pub read_only: bool,
+pub enum ComponentFileSystemNodeDetails {
+    File {
+        permissions: ComponentFilePermissions,
+        size: u64,
+    },
+    Directory,
 }
 
-impl ComponentFilePermissions {
-    pub fn to_compact_str(&self) -> &'static str {
-        if self.read_only {
-            "ro"
-        } else {
-            "rw"
-        }
-    }
-
-    pub fn from_compact_str(s: &str) -> Result<Self, String> {
-        match s {
-            "ro" => Ok(ComponentFilePermissions { read_only: true }),
-            "rw" => Ok(ComponentFilePermissions { read_only: false }),
-            _ => Err(format!("Unknown permissions: {}", s)),
-        }
-    }
-}
-
-impl Default for ComponentFilePermissions {
-    fn default() -> Self {
-        ComponentFilePermissions { read_only: false }
-    }
-}
-
-impl Serialize for ComponentFilePermissions {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        self.to_compact_str().serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for ComponentFilePermissions {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        Self::from_compact_str(&s).map_err(serde::de::Error::custom)
-    }
-}
-
-impl Encode for ComponentFilePermissions {
-    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
-        self.read_only.encode(encoder)
-    }
-}
-
-impl Decode for ComponentFilePermissions {
-    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
-        let read_only = bool::decode(decoder)?;
-        Ok(ComponentFilePermissions { read_only })
-    }
+#[derive(Clone, Debug, PartialEq)]
+pub struct ComponentFileSystemNode {
+    pub name: String,
+    pub last_modified: SystemTime,
+    pub details: ComponentFileSystemNodeDetails,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Encode, Decode)]
@@ -1276,17 +855,20 @@ impl InitialComponentFile {
     pub fn new(path: Utf8UnixPathBuf, content: Vec<u8>, read_only: bool) -> Self {
         Self {
             path,
-            permissions: ComponentFilePermissions { read_only },
+            permissions: if read_only { ComponentFilePermissions::ReadOnly } else { ComponentFilePermissions::ReadWrite },
             content,
         }
     }
 
     pub fn is_read_only(&self) -> bool {
-        self.permissions.read_only
+        match self.permissions {
+            ComponentFilePermissions::ReadOnly => true,
+            ComponentFilePermissions::ReadWrite => false,
+        }
     }
 
     pub fn with_read_only(mut self, read_only: bool) -> Self {
-        self.permissions.read_only = read_only;
+        self.permissions = if read_only { ComponentFilePermissions::ReadOnly } else { ComponentFilePermissions::ReadWrite };
         self
     }
 }
@@ -1332,7 +914,7 @@ impl Display for ComponentFilePathWithPermissionsList {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Encode, Decode)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ScanCursor {
     pub start_key: Vec<u8>,
     pub end_key: Option<Vec<u8>>,
@@ -1453,11 +1035,11 @@ impl Type for IdempotencyKey {
     type RawElementValueType = String;
 
     fn as_raw_value(&self) -> Option<&Self::RawValueType> {
-        Some(&self.0)
+        Some(&self.value)
     }
 
     fn raw_element_iter(&self) -> Box<dyn Iterator<Item = &Self::RawElementValueType>> {
-        Box::new(std::iter::once(&self.0))
+        Box::new(std::iter::once(&self.value))
     }
 }
 
@@ -1474,13 +1056,35 @@ impl Type for WorkerId {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ResourceKey<T>
-where
-    T: Clone + std::fmt::Debug + PartialEq + Eq + Hash + Serialize + Deserialize<'static> + Send + Sync,
-{
-    pub component_id: ComponentId,
-    pub key: T,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RoutingTableEntry {
+    pub worker_id: String,
+    pub shard_id: ShardId,
+    pub last_seen: SystemTime,
+}
+
+impl From<GrpcRoutingTableEntry> for RoutingTableEntry {
+    fn from(grpc_entry: GrpcRoutingTableEntry) -> Self {
+        RoutingTableEntry {
+            worker_id: grpc_entry.worker_id,
+            shard_id: grpc_entry.shard_id.unwrap_or_default().into(),
+            last_seen: grpc_entry.last_seen
+                .map(|t| SystemTime::UNIX_EPOCH + Duration::from_secs(t as u64))
+                .unwrap_or_else(SystemTime::now),
+        }
+    }
+}
+
+impl From<RoutingTableEntry> for GrpcRoutingTableEntry {
+    fn from(entry: RoutingTableEntry) -> Self {
+        GrpcRoutingTableEntry {
+            worker_id: entry.worker_id,
+            shard_id: Some(entry.shard_id.into()),
+            last_seen: Some(entry.last_seen.duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as i64),
+        }
+    }
 }
 
 impl IntoValue for UriWrapper {
