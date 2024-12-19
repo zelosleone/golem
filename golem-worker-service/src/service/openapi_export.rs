@@ -1,11 +1,11 @@
 use crate::api::definition::{HttpMethod, BindingType, ApiDefinition};
 use crate::api::openapi::{OpenAPIConverter, validate_openapi, OpenAPIError};
-use golem_worker_service_base::cache::error::CacheError; // Fixed import path
+use crate::api::api::CacheError;
 use golem_worker_service_base::gateway_api_definition::{ApiDefinitionId, ApiVersion};
 use golem_worker_service_base::gateway_api_definition::http::{MethodPattern, CompiledHttpApiDefinition};
 use golem_worker_service_base::gateway_binding::gateway_binding_compiled::GatewayBindingCompiled;
 use golem_worker_service_base::service::gateway::api_definition::ApiDefinitionError;
-use golem_service_base::auth::DefaultNamespace; // Fixed import path
+use golem_service_base::auth::DefaultNamespace;
 use axum::{
     extract::{Path, State},
     Json,
@@ -117,7 +117,7 @@ pub async fn export_openapi(
     let spec = OpenAPIConverter::convert(&converted_def);
 
     // Validate the spec
-    validate_openapi(&spec)
+    validate_openapi(&spec.clone())
         .map_err(|e| ApiStatusCode::from(e))?;
 
     // Cache the valid spec

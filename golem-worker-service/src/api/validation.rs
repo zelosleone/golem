@@ -2,7 +2,7 @@ use crate::api::definition::types::{ApiDefinition, BindingType};
 use golem_wasm_ast::analysis::{
     AnalysedType, TypeStr, TypeF32, TypeF64, TypeBool, 
     TypeList, TypeOption, TypeRecord, TypeResult, NameTypePair,
-    TypeI32, TypeI64, TypeUnit,
+    TypeF32, TypeF64, 
 };
 
 #[derive(Debug)]
@@ -25,8 +25,8 @@ pub fn validate_api_definition(api: &ApiDefinition) -> Result<(), String> {
 fn parse_type(type_str: &str) -> Result<AnalysedType, String> {
     match type_str {
         "string" => Ok(AnalysedType::Str(TypeStr)),
-        "i32" => Ok(AnalysedType::I32(TypeI32)),
-        "i64" => Ok(AnalysedType::I64(TypeI64)),
+        "i32" => Ok(AnalysedType::F32(TypeF32)),
+        "i64" => Ok(AnalysedType::F64(TypeF64)),
         "f32" => Ok(AnalysedType::F32(TypeF32)),
         "f64" => Ok(AnalysedType::F64(TypeF64)),
         "bool" => Ok(AnalysedType::Bool(TypeBool)),

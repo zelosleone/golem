@@ -2,10 +2,11 @@ use super::types::*;
 use crate::api::definition::types::{ApiDefinition, Route, HttpMethod, BindingType};
 use crate::api::definition::patterns::{AllPathPatterns, PathPattern};
 use openapiv3::{
-    OpenAPI as OpenAPISpec, Info, Paths, PathItem, Operation, Parameter,
-    ParameterLocation, Schema, MediaType, RequestBody, Response, SecurityScheme,
+    OpenAPI as OpenAPISpec, Info, Paths, PathItem, Operation, 
+    Schema, MediaType, RequestBody, Response, SecurityScheme,
     Components, ReferenceOr,
 };
+use crate::api::openapi::types::{Parameter, ParameterLocation};
 use indexmap::IndexMap;
 use std::collections::HashMap;
 use heck::ToSnakeCase;
@@ -42,7 +43,7 @@ impl OpenAPIConverter {
                     options: Some(Operation {
                         responses: {
                             let mut map = HashMap::new();
-                            map.insert("200".to_string(), Response {
+                            map.insert("200".to_string(), openapiv3::Response {
                                 description: String::new(),
                                 content: None,
                                 headers: Some(Self::create_cors_headers("*")),
@@ -83,7 +84,7 @@ impl OpenAPIConverter {
                     },
                     request_body: Self::create_request_body(route),
                     responses: {
-                        let mut map = Self::create_responses(route, "*");
+                        let mut map = Self::create_responses(route);
                         // Add CORS headers to all responses
                         for response in map.values_mut() {
                             response.headers = Some(Self::create_cors_headers("*"));
@@ -109,7 +110,7 @@ impl OpenAPIConverter {
                     },
                     request_body: Self::create_request_body(route),
                     responses: {
-                        let mut map = Self::create_responses(route, "*");
+                        let mut map = Self::create_responses(route);
                         // Add CORS headers to all responses
                         for response in map.values_mut() {
                             response.headers = Some(Self::create_cors_headers("*"));
@@ -135,7 +136,7 @@ impl OpenAPIConverter {
                     },
                     request_body: Self::create_request_body(route),
                     responses: {
-                        let mut map = Self::create_responses(route, "*");
+                        let mut map = Self::create_responses(route);
                         // Add CORS headers to all responses
                         for response in map.values_mut() {
                             response.headers = Some(Self::create_cors_headers("*"));
@@ -160,7 +161,7 @@ impl OpenAPIConverter {
                 },
                 request_body: Self::create_request_body(route),
                 responses: {
-                    let mut map = Self::create_responses(route, "*");
+                    let mut map = Self::create_responses(route);
                     // Add CORS headers to all responses
                     for response in map.values_mut() {
                         response.headers = Some(Self::create_cors_headers("*"));
@@ -184,7 +185,7 @@ impl OpenAPIConverter {
                 },
                 request_body: Self::create_request_body(route),
                 responses: {
-                    let mut map = Self::create_responses(route, "*");
+                    let mut map = Self::create_responses(route);
                     // Add CORS headers to all responses
                     for response in map.values_mut() {
                         response.headers = Some(Self::create_cors_headers("*"));
@@ -208,7 +209,7 @@ impl OpenAPIConverter {
                 },
                 request_body: Self::create_request_body(route),
                 responses: {
-                    let mut map = Self::create_responses(route, "*");
+                    let mut map = Self::create_responses(route);
                     // Add CORS headers to all responses
                     for response in map.values_mut() {
                         response.headers = Some(Self::create_cors_headers("*"));
@@ -757,7 +758,7 @@ impl OpenAPIConverter {
         headers
     }
 
-   fn create_responses(route: &Route, cors_allowed_origins: &str) -> HashMap<String, Response> {
+    fn create_responses(route: &Route) -> HashMap<String, openapiv3::Response> {
         let mut responses = HashMap::new();
 
         // Success response
@@ -782,7 +783,7 @@ impl OpenAPIConverter {
 
         responses.insert(
             "200".to_string(),
-            Response {
+            openapiv3::Response {
                 description: String::new(),
                 content,
                 headers: Some(Self::create_cors_headers(cors_allowed_origins)),
@@ -791,12 +792,12 @@ impl OpenAPIConverter {
 
 
         // Standard error responses
-        Self::add_error_responses(&mut responses, cors_allowed_origins);
+        Self::add_error_responses(&mut responses);
 
         responses
     }
 
-    fn add_error_responses(responses: &mut HashMap<String, Response>, cors_allowed_origins: &str) {
+    fn add_error_responses(responses: &mut HashMap<String, openapiv3::Response>) {
         let error_codes = ["400", "401", "403", "404", "409", "500"];
           let error_schemas = [
             "#/components/schemas/ErrorsBody",
@@ -809,7 +810,7 @@ impl OpenAPIConverter {
         for (code, schema) in error_codes.iter().zip(error_schemas.iter()) {
             responses.insert(
                 code.to_string(),
-                Response {
+                openapiv3::Response {
                     description: String::new(),
                    content: Some(HashMap::from([(
                         "application/json; charset=utf-8".to_string(),
@@ -820,7 +821,7 @@ impl OpenAPIConverter {
                             example: None,
                         }
                     )])),
-                    headers: Some(Self::create_cors_headers(cors_allowed_origins)),
+                    headers: Some(Self::create_cors_headers("*")),
                 }
             );
         }

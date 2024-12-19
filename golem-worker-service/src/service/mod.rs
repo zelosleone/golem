@@ -28,6 +28,7 @@ use golem_worker_service_base::gateway_execution::file_server_binding_handler::D
 use golem_worker_service_base::gateway_execution::file_server_binding_handler::FileServerBindingHandler;
 use worker_request_executor::UnauthorisedWorkerRequestExecutor;
 
+use crate::api::api::RedisCache;
 use golem_worker_service_base::gateway_api_definition::http::{
     CompiledHttpApiDefinition, HttpApiDefinition,
 };
@@ -53,7 +54,7 @@ use golem_api_grpc::proto::golem::workerexecutor::v1::worker_executor_client::Wo
 use golem_common::client::{GrpcClientConfig, MultiTargetGrpcClient};
 use golem_common::model::RetryConfig;
 
-use golem_common::config::DbConfig;
+use golem_common::config::{DbConfig, RedisConfig};
 use golem_common::redis::RedisPool;
 use golem_service_base::db;
 use golem_worker_service_base::gateway_execution::gateway_session::{
@@ -277,11 +278,11 @@ impl Services {
                 Arc::new(InitialComponentFilesService::new(blob_storage.clone()));
     
             let fileserver_binding_handler: Arc<
-                dyn FileServerBindingHandler<DefaultNamespace> + Sync + Send,
+            dyn FileServerBindingHandler<DefaultNamespace> + Sync + Send
             > = Arc::new(DefaultFileServerBindingHandler::new(
                 component_service.clone(),
                 initial_component_files_service.clone(),
-                worker_service.clone(),
+                worker_service.clone()
             ));
     
             let api_definition_validator_service = Arc::new(HttpApiDefinitionValidator {});
@@ -316,7 +317,7 @@ impl Services {
     
             let swagger_generator = Arc::new(SwaggerGenerator::new("swagger-ui".to_string()));
     
-            let cache = Arc::new(RedisCache::new(config.redis.url().to_string())
+            let cache = Arc::new(RedisCache::new(config.redis.clone())
                 .await
                 .map_err(|e| format!("Failed to initialize Redis cache: {}", e))?);
     
