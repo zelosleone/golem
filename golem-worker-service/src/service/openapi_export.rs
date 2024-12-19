@@ -1,11 +1,11 @@
-use crate::api::definition::{HttpMethod, BindingType};
+use crate::api::definition::{HttpMethod, BindingType, ApiDefinition};
 use crate::api::openapi::{OpenAPIConverter, validate_openapi, OpenAPIError};
-use golem_service_base::error::CacheError; // Updated import path
+use golem_worker_service_base::cache::error::CacheError; // Fixed import path
 use golem_worker_service_base::gateway_api_definition::{ApiDefinitionId, ApiVersion};
-use golem_worker_service_base::gateway_api_definition::http::MethodPattern;
+use golem_worker_service_base::gateway_api_definition::http::{MethodPattern, CompiledHttpApiDefinition};
 use golem_worker_service_base::gateway_binding::gateway_binding_compiled::GatewayBindingCompiled;
 use golem_worker_service_base::service::gateway::api_definition::ApiDefinitionError;
-use golem_worker_service_base::DefaultNamespace;
+use golem_service_base::auth::DefaultNamespace; // Fixed import path
 use axum::{
     extract::{Path, State},
     Json,
@@ -45,7 +45,6 @@ impl From<OpenAPIError> for ApiStatusCode {
             OpenAPIError::InvalidDefinition(_) => StatusCode::BAD_REQUEST,
             OpenAPIError::ValidationFailed(_) => StatusCode::INTERNAL_SERVER_ERROR,
             OpenAPIError::SchemaMismatch { .. } => StatusCode::BAD_REQUEST,
-            _ => StatusCode::INTERNAL_SERVER_ERROR,
         };
         ApiStatusCode(status)
     }
@@ -83,8 +82,8 @@ fn convert_method(method: &MethodPattern) -> HttpMethod {
 fn convert_binding(binding: &GatewayBindingCompiled) -> BindingType {
     match binding {
         GatewayBindingCompiled::Worker(_) => BindingType::Worker,
-        GatewayBindingCompiled::Static(_) => BindingType::Static,
-        GatewayBindingCompiled::FileServer(_) => BindingType::Worker, // or appropriate type
+        GatewayBindingCompiled::Static(_) => BindingType::Worker, // Changed to Worker since Static isn't available
+        GatewayBindingCompiled::FileServer(_) => BindingType::Worker,
     }
 }
 
@@ -113,7 +112,9 @@ pub async fn export_openapi(
     .map_err(|e| ApiStatusCode::from(e))?
     .ok_or_else(|| ApiStatusCode(StatusCode::NOT_FOUND))?;
 
-    let spec = OpenAPIConverter::convert(&api_def);
+    // Convert CompiledHttpApiDefinition to ApiDefinition
+    let converted_def = ApiDefinition::from(&api_def);
+    let spec = OpenAPIConverter::convert(&converted_def);
 
     // Validate the spec
     validate_openapi(&spec)

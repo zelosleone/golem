@@ -70,6 +70,7 @@ thiserror = { workspace = true }
 heck = { workspace = true }
 validator = { workspace = true }
 redis = { version = "0.23", features = ["tokio-comp", "aio"] }
+indexmap = { workspace = true }
 
 [dev-dependencies]
 test-r = { workspace = true }

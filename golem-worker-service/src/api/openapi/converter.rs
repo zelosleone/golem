@@ -1,10 +1,14 @@
 use super::types::*;
 use crate::api::definition::types::{ApiDefinition, Route, HttpMethod, BindingType};
 use crate::api::definition::patterns::{AllPathPatterns, PathPattern};
+use openapiv3::{
+    OpenAPI as OpenAPISpec, Info, Paths, PathItem, Operation, Parameter,
+    ParameterLocation, Schema, MediaType, RequestBody, Response, SecurityScheme,
+    Components, ReferenceOr,
+};
 use indexmap::IndexMap;
 use std::collections::HashMap;
 use heck::ToSnakeCase;
-use openapiv3::Components;
 
 pub struct OpenAPIConverter;
 
@@ -23,9 +27,9 @@ impl OpenAPIConverter {
         }
     }
 
-    pub fn convert_paths(routes: &[Route]) -> openapiv3::Paths {
-        let paths_map = {
-            let mut paths = HashMap::new();
+    pub fn convert_paths(routes: &[Route]) -> Paths {
+        let paths_map: IndexMap<String, ReferenceOr<PathItem>> = {
+            let mut paths = IndexMap::new();
 
             for route in routes {
                 let operation = Self::generate_operation(route);
@@ -50,13 +54,13 @@ impl OpenAPIConverter {
                     parameters: None,
                 };
 
-                paths.insert(route.path.clone(), path_item);
+                paths.insert(route.path.clone(), ReferenceOr::Item(path_item));
             }
 
             paths
         };
 
-        openapiv3::Paths {
+        Paths {
             paths: paths_map,
             ..Default::default()
         }
@@ -823,7 +827,7 @@ impl OpenAPIConverter {
     }
 
 
-    pub fn create_components(routes: &[Route]) -> Components {
+    fn create_components(routes: &[Route]) -> Components {
         let mut components = Components {
             schemas: IndexMap::new(),
             responses: IndexMap::new(),

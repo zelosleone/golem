@@ -7,7 +7,8 @@ use tracing::warn;
 
 pub fn validate_openapi(spec: &OpenAPISpec) -> Result<(), String> {
     validate_paths(&spec.paths)?;
-    validate_schemas(&spec.components.as_ref().unwrap().schemas)?;
+    let schemas = spec.components.as_ref().and_then(|c| c.schemas.as_ref());
+    validate_schemas(schemas)?;
     Ok(())
 }
 
@@ -137,14 +138,14 @@ pub(crate) fn validate_path_pattern(path: &str) -> Result<(), OpenAPIError> {
             for p in pattern.path_patterns {
                 match p {
                     PathPattern::Var(info) => {
-                        if (!validate_parameter_name(&info.key_name)) {
+                        if !validate_parameter_name(&info.key_name) {
                             return Err(OpenAPIError::ValidationFailed(
                                 format!("Invalid path parameter name: {}", info.key_name)
                             ));
                         }
                     },
                     PathPattern::CatchAllVar(info) => {
-                        if (!validate_catch_all_name(&info.key_name)) {
+                        if !validate_catch_all_name(&info.key_name) {
                             return Err(OpenAPIError::ValidationFailed(
                                 format!("Invalid catch-all parameter name: {}", info.key_name)
                             ));
@@ -184,7 +185,9 @@ pub(crate) fn validate_operation_types(operation: &Operation) -> Result<(), Open
     // Validate parameters
     for param in &operation.parameters {
         if let ReferenceOr::Item(param) = param {
-            validate_parameter_schema(param.parameter_data().format)?;
+            if let Some(schema) = &param.parameter_data().schema {
+                validate_parameter_schema(schema)?;
+            }
         }
     }
 
@@ -217,7 +220,7 @@ fn validate_parameter_schema(schema: &OpenAPISchema) -> Result<(), OpenAPIError>
 }
 
 mod tests {
-    use super::*;
+    use super::{validate_parameter_name, validate_catch_all_name};
 
     #[test]
     fn test_parameter_name_validation() {
