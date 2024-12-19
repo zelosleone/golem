@@ -64,7 +64,7 @@ fn validate_path_parameter(path: &str, p: &super::types::Parameter) -> Result<()
 }
 
 
-fn validate_schemas(schemas: &Option<HashMap<String, crate::api::openapi::OpenAPISchema>>) -> Result<(), 
+fn validate_schemas(schemas: &Option<HashMap<String, crate::api::openapi::OpenAPISchema>>) -> Result<(), String> {
     if let Some(schemas) = schemas {
         for (name, schema) in schemas {
             validate_schema(name, schema)?;
