@@ -19,6 +19,8 @@ use golem_api_grpc::proto::golem::{
     common::FilterComparator,
 };
 use prost_types::Timestamp;
+use crate::uri::cloud::url::ResourceUrl;
+use serde::{Deserialize, Serialize};
 use golem_api_grpc::proto::golem::worker::{
     WorkerFilter as GrpcWorkerFilter, FileSystemNode, IdempotencyKey as GrpcIdempotencyKey
 };
