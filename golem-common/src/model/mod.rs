@@ -1410,23 +1410,42 @@ impl Decode for ComponentFilePermissions {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Encode, Decode)]
 #[cfg_attr(feature = "poem", derive(poem_openapi::Object))]
 #[cfg_attr(feature = "poem", oai(rename_all = "camelCase"))]
 #[serde(rename_all = "camelCase")]
 pub struct InitialComponentFile {
-    pub key: InitialComponentFileKey,
-    pub path: ComponentFilePath,
+    pub path: Utf8UnixPathBuf,
     pub permissions: ComponentFilePermissions,
+    pub content: Vec<u8>,
 }
 
 impl InitialComponentFile {
+    pub fn new(path: Utf8UnixPathBuf, content: Vec<u8>, read_only: bool) -> Self {
+        Self {
+            path,
+            permissions: ComponentFilePermissions { read_only },
+            content,
+        }
+    }
+
     pub fn is_read_only(&self) -> bool {
         self.permissions.read_only
     }
+
+    pub fn with_read_only(mut self, read_only: bool) -> Self {
+        self.permissions.read_only = read_only;
+        self
+    }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+impl From<(Utf8UnixPathBuf, Vec<u8>)> for InitialComponentFile {
+    fn from((path, content): (Utf8UnixPathBuf, Vec<u8>)) -> Self {
+        Self::new(path, content, false)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "poem", derive(poem_openapi::Object))]
 #[cfg_attr(feature = "poem", oai(rename_all = "camelCase"))]
 #[serde(rename_all = "camelCase")]
@@ -1548,72 +1567,51 @@ impl IntoValue for Uri {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Encode, Decode, Serialize, Deserialize)]
-#[cfg_attr(feature = "poem", derive(poem_openapi::Enum))]
-pub enum WorkerEvent {
-    Started {
-        worker_id: Uuid,
-        component_id: ComponentId,
-    },
-    Stopped {
-        worker_id: Uuid,
-        component_id: ComponentId,
-        reason: String,
-    },
-    Failed {
-        worker_id: Uuid,
-        component_id: ComponentId,
-        error: String,
-    },
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Encode, Decode)]
+pub struct ResourceKey<T>
+where
+    T: Clone + std::fmt::Debug + PartialEq + Eq + Hash + Serialize + for<'de> Deserialize<'de>,
+{
+    pub component_id: ComponentId,
+    pub key: T,
 }
 
-impl Encode for WorkerEvent {
-    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
-        match self {
-            WorkerEvent::Started { worker_id, component_id } => {
-                0u8.encode(encoder)?;
-                worker_id.encode(encoder)?;
-                component_id.encode(encoder)
-            }
-            WorkerEvent::Stopped { worker_id, component_id, reason } => {
-                1u8.encode(encoder)?;
-                worker_id.encode(encoder)?;
-                component_id.encode(encoder)?;
-                reason.encode(encoder)
-            }
-            WorkerEvent::Failed { worker_id, component_id, error } => {
-                2u8.encode(encoder)?;
-                worker_id.encode(encoder)?;
-                component_id.encode(encoder)?;
-                error.encode(encoder)
-            }
-        }
+impl<T> ResourceKey<T>
+where
+    T: Clone + std::fmt::Debug + PartialEq + Eq + Hash + Serialize + for<'de> Deserialize<'de>,
+{
+    pub fn new(component_id: ComponentId, key: T) -> Self {
+        Self { component_id, key }
     }
 }
 
-impl Decode for WorkerEvent {
+impl<T> Encode for ResourceKey<T>
+where
+    T: Clone + std::fmt::Debug + PartialEq + Eq + Hash + Serialize + for<'de> Deserialize<'de> + Encode,
+{
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        self.component_id.encode(encoder)?;
+        self.key.encode(encoder)
+    }
+}
+
+impl<T> Decode for ResourceKey<T>
+where
+    T: Clone + std::fmt::Debug + PartialEq + Eq + Hash + Serialize + for<'de> Deserialize<'de> + Decode,
+{
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
-        match u8::decode(decoder)? {
-            0 => Ok(WorkerEvent::Started {
-                worker_id: Uuid::decode(decoder)?,
-                component_id: ComponentId::decode(decoder)?,
-            }),
-            1 => Ok(WorkerEvent::Stopped {
-                worker_id: Uuid::decode(decoder)?,
-                component_id: ComponentId::decode(decoder)?,
-                reason: String::decode(decoder)?,
-            }),
-            2 => Ok(WorkerEvent::Failed {
-                worker_id: Uuid::decode(decoder)?,
-                component_id: ComponentId::decode(decoder)?,
-                error: String::decode(decoder)?,
-            }),
-            tag => Err(DecodeError::UnexpectedVariant {
-                found: tag as _,
-                type_name: "WorkerEvent",
-                allowed_variants: &[0, 1, 2],
-            }),
-        }
+        let component_id = ComponentId::decode(decoder)?;
+        let key = T::decode(decoder)?;
+        Ok(Self { component_id, key })
+    }
+}
+
+impl<T> Display for ResourceKey<T>
+where
+    T: Clone + std::fmt::Debug + PartialEq + Eq + Hash + Serialize + for<'de> Deserialize<'de> + Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}:{}", self.component_id, self.key)
     }
 }
 
@@ -1645,5 +1643,124 @@ where
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         let inner = T::decode(decoder)?;
         Ok(AnalysedTypeWrapper { inner })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Encode, Decode)]
+pub struct ScanCursor {
+    pub start_key: Vec<u8>,
+    pub end_key: Option<Vec<u8>>,
+    pub limit: Option<u32>,
+    pub reverse: bool,
+}
+
+impl ScanCursor {
+    pub fn new(start_key: Vec<u8>) -> Self {
+        Self {
+            start_key,
+            end_key: None,
+            limit: None,
+            reverse: false,
+        }
+    }
+
+    pub fn with_end_key(mut self, end_key: Vec<u8>) -> Self {
+        self.end_key = Some(end_key);
+        self
+    }
+
+    pub fn with_limit(mut self, limit: u32) -> Self {
+        self.limit = Some(limit);
+        self
+    }
+
+    pub fn with_reverse(mut self, reverse: bool) -> Self {
+        self.reverse = reverse;
+        self
+    }
+}
+
+impl Default for ScanCursor {
+    fn default() -> Self {
+        Self {
+            start_key: Vec::new(),
+            end_key: None,
+            limit: None,
+            reverse: false,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "poem", derive(poem_openapi::Object))]
+#[cfg_attr(feature = "poem", oai(rename_all = "camelCase"))]
+#[serde(rename_all = "camelCase")]
+pub struct WorkerEvent {
+    pub worker_id: Uuid,
+    pub component_id: ComponentId,
+    pub event_type: WorkerEventType,
+}
+
+impl WorkerEvent {
+    pub fn new(worker_id: Uuid, component_id: ComponentId, event_type: WorkerEventType) -> Self {
+        Self {
+            worker_id,
+            component_id,
+            event_type,
+        }
+    }
+}
+
+impl Encode for WorkerEvent {
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        self.worker_id.encode(encoder)?;
+        self.component_id.encode(encoder)?;
+        self.event_type.encode(encoder)
+    }
+}
+
+impl Decode for WorkerEvent {
+    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+        let worker_id = Uuid::decode(decoder)?;
+        let component_id = ComponentId::decode(decoder)?;
+        let event_type = WorkerEventType::decode(decoder)?;
+        Ok(WorkerEvent {
+            worker_id,
+            component_id,
+            event_type,
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Encode, Decode)]
+#[cfg_attr(feature = "poem", derive(poem_openapi::Enum))]
+pub enum WorkerEventType {
+    Started,
+    Stopped,
+    Failed,
+}
+
+impl Encode for WorkerEventType {
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        match self {
+            WorkerEventType::Started => 0u8.encode(encoder),
+            WorkerEventType::Stopped => 1u8.encode(encoder),
+            WorkerEventType::Failed => 2u8.encode(encoder),
+        }
+    }
+}
+
+impl Decode for WorkerEventType {
+    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+        match u8::decode(decoder)? {
+            0 => Ok(WorkerEventType::Started),
+            1 => Ok(WorkerEventType::Stopped),
+            2 => Ok(WorkerEventType::Failed),
+            tag => Err(DecodeError::UnexpectedVariant {
+                found: tag as _,
+                type_name: "WorkerEventType",
+                allowed_variants: &[0, 1, 2],
+            }),
+        }
     }
 }
