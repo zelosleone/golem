@@ -12,16 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use bincode::{Decode, Encode};
-use golem_wasm_ast::analysis::AnalysedType;
-use golem_wasm_rpc::IntoValue;
-use golem_api_grpc::proto::golem::worker::{PromiseId as GrpcPromiseId, IdempotencyKey as GrpcIdempotencyKey, TargetWorkerId};
+use bincode::{Decode, Encode, BorrowDecode};
+use bincode::de::{Decoder, BorrowDecoder};
+use bincode::enc::Encoder;
+use bincode::error::{DecodeError, EncodeError};
+use golem_api_grpc::proto::golem::worker::{PromiseId as GrpcPromiseId, IdempotencyKey as GrpcIdempotencyKey, WorkerId};
+use golem_api_grpc::proto::golem::component::{ComponentId, ComponentFilePermissions};
+use golem_api_grpc::proto::golem::common::{PluginInstallationId, ComponentVersion, ProjectId};
 use golem_api_grpc::proto::golem::shardmanager::{Pod, RoutingTable, RoutingTableEntry as GrpcRoutingTableEntry, ShardId as GrpcShardId};
 use golem_api_grpc::proto::golem::common::StringFilterComparator as GrpcStringFilterComparator;
+use golem_wasm_ast::analysis::AnalysedType;
+use golem_wasm_rpc::IntoValue;
 use poem_openapi::types::Type;
-use serde::{Deserialize, Serialize};
+use prost_types::Timestamp;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::cmp::Ordering;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::{self, Display, Formatter};
-use std::collections::{HashMap, HashSet};
+use std::str::FromStr;
 use std::time::{Duration, SystemTime};
 use typed_path::Utf8UnixPathBuf;
 use uuid::Uuid;
@@ -622,8 +630,7 @@ pub trait HasAccountId {
     fn account_id(&self) -> AccountId;
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Encode, Decode)]
-#[cfg_attr(feature = "poem", derive(poem_openapi::Enum))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum StringFilterComparator {
     Equal,
     NotEqual,
@@ -677,7 +684,7 @@ pub struct Empty {}
 pub struct InitialComponentFileKey(pub String);
 
 impl Display for InitialComponentFileKey {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
     }
 }

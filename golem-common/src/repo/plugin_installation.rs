@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::model::plugin::ComponentPluginInstallationTarget;
-use crate::model::ComponentId;
+use golem_api_grpc::proto::golem::component::ComponentId;
+use crate::model::plugin::PluginInstallation;
 use crate::repo::RowMeta;
 use sqlx::query_builder::Separated;
 use sqlx::{Database, Encode, QueryBuilder};
@@ -55,19 +55,19 @@ where
     }
 }
 
-impl TryFrom<ComponentPluginInstallationRow> for ComponentPluginInstallationTarget {
+impl TryFrom<ComponentPluginInstallationRow> for PluginInstallation {
     type Error = String;
 
     fn try_from(value: ComponentPluginInstallationRow) -> Result<Self, Self::Error> {
-        Ok(ComponentPluginInstallationTarget {
+        Ok(PluginInstallation {
             component_id: ComponentId(value.component_id),
             component_version: value.component_version as u64,
         })
     }
 }
 
-impl From<ComponentPluginInstallationTarget> for ComponentPluginInstallationRow {
-    fn from(value: ComponentPluginInstallationTarget) -> Self {
+impl From<PluginInstallation> for ComponentPluginInstallationRow {
+    fn from(value: PluginInstallation) -> Self {
         ComponentPluginInstallationRow {
             component_id: value.component_id.0,
             component_version: value.component_version as i64,

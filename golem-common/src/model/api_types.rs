@@ -1,9 +1,13 @@
+use golem_api_grpc::proto::golem::{
+    common,
+    worker,
+    component::ComponentId,
+};
 use poem_openapi::types::{ParseFromJSON, ParseFromParameter, ToJSON, Type};
 use serde::{Deserialize, Serialize};
-use golem_api_grpc::proto::golem::worker;
-use golem_api_grpc::proto::golem::common;
-use uuid::Uuid;
 use serde_json::Value as JsonValue;
+use std::str::FromStr;
+use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ApiIdempotencyKey {
@@ -87,7 +91,7 @@ impl From<ApiWorkerId> for worker::WorkerId {
     fn from(id: ApiWorkerId) -> Self {
         let parts: Vec<&str> = id.value.split('/').collect();
         worker::WorkerId {
-            component_id: Some(common::ComponentId { value: parts[0].to_string() }),
+            component_id: Some(ComponentId { value: parts[0].to_string() }),
             name: parts[1].to_string(),
         }
     }

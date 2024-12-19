@@ -12,9 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::model::{AccountId, WorkerInvocation};
+use golem_api_grpc::proto::golem::{
+    common::PluginInstallationId,
+    worker::WorkerId,
+};
+use prost_types::Timestamp;
+use crate::uri::cloud::url::ResourceUrl;
+
 use crate::model::regions::OplogRegion;
 use crate::model::RetryConfig;
-use crate::model::{AccountId, ComponentVersion, PluginInstallationId, Timestamp, WorkerId, WorkerInvocation,};
+use crate::model::{ComponentVersion,};
 use crate::model::snapshot::{ComponentSnapshot,};
 use golem_api_grpc::proto::golem::worker::IdempotencyKey;
 use bincode::de::read::Reader;

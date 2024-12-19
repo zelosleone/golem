@@ -12,14 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::model::{
-    AccountId as ModelAccountId, ComponentFilePath, Timestamp,
-    WorkerId, ComponentType, FilterComparator, LogLevel, 
-    ComponentFilePermissions, InitialComponentFile,
-    ComponentFileSystemNode, ComponentFileSystemNodeDetails, GatewayBindingType,
-    WorkerStatus, TargetWorkerId, Pod, ShardId, RoutingTable, RoutingTableEntry,
-    InitialComponentFileKey, PromiseId, StringFilterComparator, ApiIdempotencyKey, ApiWorkerId
+use crate::model::{AccountId as ModelAccountId, ComponentFilePath, LogLevel};
+use golem_api_grpc::proto::golem::{
+    worker::WorkerId,
+    component::ComponentType,
+    common::FilterComparator,
 };
+use prost_types::Timestamp;
 use golem_api_grpc::proto::golem::worker::{
     WorkerFilter as GrpcWorkerFilter, FileSystemNode, IdempotencyKey as GrpcIdempotencyKey
 };
@@ -27,7 +26,6 @@ use golem_api_grpc::proto::golem::shardmanager::{
     Pod as GrpcPod, RoutingTable as GrpcRoutingTable, RoutingTableEntry as GrpcRoutingTableEntry, ShardId as GrpcShardId
 };
 use golem_api_grpc::proto::golem::common::{
-    FilterComparator as GrpcFilterComparator, 
     StringFilterComparator as GrpcStringFilterComparator
 };
 use golem_api_grpc::proto::golem::component::{

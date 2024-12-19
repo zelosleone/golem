@@ -12,31 +12,33 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use golem_api_grpc::proto::golem::apidefinition;
-use golem_api_grpc::proto::golem::common;
-use golem_api_grpc::proto::golem::component;
-use golem_api_grpc::proto::golem::worker;
-
-use crate::model::{
-    AccountId, ComponentId, PluginInstallationId, PromiseId, TargetWorkerId, WorkerId,
+use golem_api_grpc::proto::golem::{
+    component::ComponentId,
+    common::PluginInstallationId,
+    worker::{self, WorkerId, TargetWorkerId, IdempotencyKey},
 };
 
-use golem_api_grpc::proto::golem::worker::IdempotencyKey;
+use crate::model::{
+    AccountId, PromiseId, WorkerInvocation, WorkerInvocationResult, WorkerStatus,
+};
 
-pub fn proto_component_id_string(component_id: &Option<component::ComponentId>) -> Option<String> {
+use golem_api_grpc::proto::golem::apidefinition;
+use golem_api_grpc::proto::golem::common;
+
+pub fn proto_component_id_string(component_id: &Option<ComponentId>) -> Option<String> {
     (*component_id)
         .and_then(|v| TryInto::<ComponentId>::try_into(v).ok())
         .map(|v| v.to_string())
 }
 
-pub fn proto_worker_id_string(worker_id: &Option<worker::WorkerId>) -> Option<String> {
+pub fn proto_worker_id_string(worker_id: &Option<WorkerId>) -> Option<String> {
     worker_id
         .clone()
         .and_then(|v| TryInto::<WorkerId>::try_into(v).ok())
         .map(|v| v.to_string())
 }
 
-pub fn proto_target_worker_id_string(worker_id: &Option<worker::TargetWorkerId>) -> Option<String> {
+pub fn proto_target_worker_id_string(worker_id: &Option<TargetWorkerId>) -> Option<String> {
     worker_id
         .clone()
         .and_then(|v| TryInto::<TargetWorkerId>::try_into(v).ok())
@@ -44,7 +46,7 @@ pub fn proto_target_worker_id_string(worker_id: &Option<worker::TargetWorkerId>)
 }
 
 pub fn proto_idempotency_key_string(
-    idempotency_key: &Option<worker::IdempotencyKey>,
+    idempotency_key: &Option<IdempotencyKey>,
 ) -> Option<String> {
     idempotency_key
         .clone()
@@ -65,7 +67,7 @@ pub fn proto_promise_id_string(promise_id: &Option<worker::PromiseId>) -> Option
 }
 
 pub fn proto_plugin_installation_id_string(
-    component_id: &Option<common::PluginInstallationId>,
+    component_id: &Option<PluginInstallationId>,
 ) -> Option<String> {
     (*component_id)
         .and_then(|v| TryInto::<PluginInstallationId>::try_into(v).ok())
