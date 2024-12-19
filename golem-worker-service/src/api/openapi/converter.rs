@@ -22,24 +22,83 @@ trait IntoOpenApi<T> {
 impl IntoOpenApi<openapiv3::Schema> for crate::api::openapi::types::Schema {
     fn into_openapi(self) -> openapiv3::Schema {
         match self {
-            Self::String { format, enum_values } => openapiv3::Schema::String(openapiv3::StringType {
-                format,
-                enum_values,
-                ..Default::default()
-            }),
-            Self::Integer { format } => openapiv3::Schema::Integer(openapiv3::IntegerType {
-                format,
-                ..Default::default()
-            }),
-            Self::Boolean => openapiv3::Schema::Boolean(openapiv3::BooleanType::default()),
-            Self::Array { items } => openapiv3::Schema::Array(openapiv3::ArrayType {
-                items: Box::new(items.into_openapi()),
-                ..Default::default()
-            }),
-            Self::Ref { reference } => openapiv3::Schema::Reference { 
-                reference 
+            Self::String { format, enum_values } => {
+                let string_format = format.map(|f| match f.as_str() {
+                    "date" => openapiv3::StringFormat::Date,
+                    "date-time" => openapiv3::StringFormat::DateTime,
+                    "binary" => openapiv3::StringFormat::Binary,
+                    _ => openapiv3::StringFormat::Default,
+                });
+                openapiv3::Schema {
+                    schema_data: Default::default(),
+                    schema_kind: openapiv3::SchemaKind::Type(openapiv3::Type::String(openapiv3::StringType {
+                        format: string_format.into(),
+                        pattern: None,
+                        enumeration: enum_values,
+                        min_length: None,
+                        max_length: None,
+                    })),
+                }
             },
-            // Add other conversions as needed
+            Self::Integer { format } => {
+                let int_format = format.map(|f| match f.as_str() {
+                    "int32" => openapiv3::IntegerFormat::Int32,
+                    "int64" => openapiv3::IntegerFormat::Int64,
+                    _ => openapiv3::IntegerFormat::Default,
+                });
+                openapiv3::Schema {
+                    schema_data: Default::default(),
+                    schema_kind: openapiv3::SchemaKind::Type(openapiv3::Type::Integer(openapiv3::IntegerType {
+                        format: int_format.into(),
+                        multiple_of: None,
+                        minimum: None,
+                        maximum: None,
+                        exclusive_minimum: false,
+                        exclusive_maximum: false,
+                    })),
+                }
+            },
+            Self::Boolean => openapiv3::Schema {
+                schema_data: Default::default(),
+                schema_kind: openapiv3::SchemaKind::Type(openapiv3::Type::Boolean(Default::default()))
+            },
+            Self::Array { items } => openapiv3::Schema {
+                schema_data: Default::default(),
+                schema_kind: openapiv3::SchemaKind::Type(openapiv3::Type::Array(openapiv3::ArrayType {
+                    items: Some(ReferenceOr::Item(Box::new(items.into_openapi()))),
+                    min_items: None,
+                    max_items: None,
+                    unique_items: false,
+                })),
+            },
+            Self::Ref { reference } => openapiv3::Schema {
+                schema_data: Default::default(),
+                schema_kind: openapiv3::SchemaKind::Reference {
+                    reference,
+                },
+            },
+            Self::Object { properties, required, additional_properties } => {
+                let converted_props = properties.into_iter()
+                    .map(|(k, v)| (k, ReferenceOr::Item(v.into_openapi())))
+                    .collect();
+                let additional = additional_properties.map(|schema| 
+                    openapiv3::AdditionalProperties::Schema(Box::new(schema.into_openapi())));
+                
+                openapiv3::Schema {
+                    schema_data: Default::default(),
+                    schema_kind: openapiv3::SchemaKind::Type(openapiv3::Type::Object(openapiv3::ObjectType {
+                        properties: converted_props,
+                        required: required.unwrap_or_default(),
+                        additional_properties: additional,
+                        min_properties: None,
+                        max_properties: None,
+                    })),
+                }
+            },
+            Self::Number => openapiv3::Schema {
+                schema_data: Default::default(),
+                schema_kind: openapiv3::SchemaKind::Type(openapiv3::Type::Number(Default::default()))
+            },
         }
     }
 }
