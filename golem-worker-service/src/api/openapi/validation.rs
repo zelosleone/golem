@@ -100,9 +100,11 @@ fn validate_type(type_: &openapiv3::Type) -> Result<(), String> {
         openapiv3::Type::Integer(_) |
         openapiv3::Type::Boolean { .. } => Ok(()),
         openapiv3::Type::Array(array) => {
-            // Validate array items
-            if let ReferenceOr::Item(schema) = &array.items {
-                validate_schema("array_items", schema)
+            if let Some(items) = array.items.as_ref() {
+                match items {
+                    ReferenceOr::Item(schema) => validate_schema("array_items", schema),
+                    ReferenceOr::Reference { reference } => validate_schema_ref(&"array_items".to_string(), reference)
+                }
             } else {
                 Ok(())
             }
@@ -135,14 +137,14 @@ pub(crate) fn validate_path_pattern(path: &str) -> Result<(), OpenAPIError> {
             for p in pattern.path_patterns {
                 match p {
                     PathPattern::Var(info) => {
-                        if !validate_parameter_name(&info.key_name) {
+                        if (!validate_parameter_name(&info.key_name)) {
                             return Err(OpenAPIError::ValidationFailed(
                                 format!("Invalid path parameter name: {}", info.key_name)
                             ));
                         }
                     },
                     PathPattern::CatchAllVar(info) => {
-                        if !validate_catch_all_name(&info.key_name) {
+                        if (!validate_catch_all_name(&info.key_name)) {
                             return Err(OpenAPIError::ValidationFailed(
                                 format!("Invalid catch-all parameter name: {}", info.key_name)
                             ));
@@ -182,7 +184,7 @@ pub(crate) fn validate_operation_types(operation: &Operation) -> Result<(), Open
     // Validate parameters
     for param in &operation.parameters {
         if let ReferenceOr::Item(param) = param {
-            validate_parameter_schema(&param.parameter_data.format)?;
+            validate_parameter_schema(param.parameter_data().format)?;
         }
     }
 
@@ -213,8 +215,9 @@ fn validate_parameter_schema(schema: &OpenAPISchema) -> Result<(), OpenAPIError>
         }
     }
 }
+
 mod tests {
-    use super::{validate_parameter_name, validate_catch_all_name};
+    use super::*;
 
     #[test]
     fn test_parameter_name_validation() {

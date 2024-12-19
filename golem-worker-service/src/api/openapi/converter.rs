@@ -1,6 +1,7 @@
 use super::types::*;
 use crate::api::definition::types::{ApiDefinition, Route, HttpMethod, BindingType};
 use crate::api::definition::patterns::{AllPathPatterns, PathPattern};
+use indexmap::IndexMap;
 use std::collections::HashMap;
 use heck::ToSnakeCase;
 use openapiv3::Components;
@@ -22,36 +23,43 @@ impl OpenAPIConverter {
         }
     }
 
-    fn convert_paths(routes: &[Route]) -> HashMap<String, PathItem> {
-        let mut paths = HashMap::new();
+    pub fn convert_paths(routes: &[Route]) -> openapiv3::Paths {
+        let paths_map = {
+            let mut paths = HashMap::new();
 
-        for route in routes {
-            let operation = Self::generate_operation(route);
+            for route in routes {
+                let operation = Self::generate_operation(route);
 
-            let path_item = PathItem {
-                get: if route.method == HttpMethod::Get { Some(operation.clone()) } else { None },
-                post: if route.method == HttpMethod::Post { Some(operation.clone()) } else { None },
-                put: if route.method == HttpMethod::Put { Some(operation.clone()) } else { None },
-                delete: if route.method == HttpMethod::Delete { Some(operation.clone()) } else { None },
-                options: Some(Operation {
-                    responses: {
-                        let mut map = HashMap::new();
-                        map.insert("200".to_string(), Response {
-                            description: String::new(),
-                            content: None,
-                            headers: Some(Self::create_cors_headers("*")),
-                        });
-                        map
-                    },
-                    ..operation
-                }),
-                parameters: None,
-            };
+                let path_item = PathItem {
+                    get: if route.method == HttpMethod::Get { Some(operation.clone()) } else { None },
+                    post: if route.method == HttpMethod::Post { Some(operation.clone()) } else { None },
+                    put: if route.method == HttpMethod::Put { Some(operation.clone()) } else { None },
+                    delete: if route.method == HttpMethod::Delete { Some(operation.clone()) } else { None },
+                    options: Some(Operation {
+                        responses: {
+                            let mut map = HashMap::new();
+                            map.insert("200".to_string(), Response {
+                                description: String::new(),
+                                content: None,
+                                headers: Some(Self::create_cors_headers("*")),
+                            });
+                            map
+                        },
+                        ..operation
+                    }),
+                    parameters: None,
+                };
 
-            paths.insert(route.path.clone(), path_item);
+                paths.insert(route.path.clone(), path_item);
+            }
+
+            paths
+        };
+
+        openapiv3::Paths {
+            paths: paths_map,
+            ..Default::default()
         }
-
-        paths
     }
 
     fn generate_operation(route: &Route) -> Operation {
@@ -817,137 +825,180 @@ impl OpenAPIConverter {
 
     pub fn create_components(routes: &[Route]) -> Components {
         let mut components = Components {
-            schemas: Some(HashMap::new()),
-            responses: Some(HashMap::new()),
-            parameters: Some(Self::create_common_parameters()),
-            security_schemes: Some(HashMap::new()),
+            schemas: IndexMap::new(),
+            responses: IndexMap::new(),
+            parameters: IndexMap::new(),
+            examples: IndexMap::new(),
+            request_bodies: IndexMap::new(),
+            headers: IndexMap::new(),
+            security_schemes: IndexMap::new(),
+            links: IndexMap::new(),
+            callbacks: IndexMap::new(),
+            extensions: IndexMap::new(),
         };
 
-        if let Some(schemas) = &mut components.schemas {
-            // Add standard error schemas
-            schemas.insert(
-                "ErrorsBody".to_string(),
-                Schema::Object {
-                    properties: HashMap::from([
-                        ("errors".to_string(), Schema::Array {
-                            items: Box::new(Schema::String {
-                                format: None,
-                                enum_values: None
-                            })
-                        })
-                    ]),
-                    required: Some(vec!["errors".to_string()]),
-                    additional_properties: None,
-                }
-            );
-
-            schemas.insert(
-                "ErrorBody".to_string(),
-                Schema::Object {
-                    properties: HashMap::from([
-                        ("error".to_string(), Schema::String {
+        // Add standard error schemas
+        components.schemas.insert(
+            "ErrorsBody".to_string(),
+            ReferenceOr::Item(Schema::Object {
+                properties: HashMap::from([
+                    ("errors".to_string(), Schema::Array {
+                        items: Box::new(Schema::String {
                             format: None,
                             enum_values: None
                         })
-                    ]),
-                    required: Some(vec!["error".to_string()]),
-                    additional_properties: None,
-                }
-            );
+                    })
+                ]),
+                required: Some(vec!["errors".to_string()]),
+                additional_properties: None,
+            })
+        );
 
-            schemas.insert(
-                "GolemErrorBody".to_string(),
-                Schema::Object {
-                    properties: HashMap::from([
-                        ("golemError".to_string(), Schema::Ref {
-                            reference: "#/components/schemas/GolemError".to_string()
-                        })
-                    ]),
-                    required: Some(vec!["golemError".to_string()]),
-                    additional_properties: None,
-                }
-            );
+        components.schemas.insert(
+            "ErrorBody".to_string(),
+            ReferenceOr::Item(Schema::Object {
+                properties: HashMap::from([
+                    ("error".to_string(), Schema::String {
+                        format: None,
+                        enum_values: None
+                    })
+                ]),
+                required: Some(vec!["error".to_string()]),
+                additional_properties: None,
+            })
+        );
 
-           // Add WorkersMetadataResponse
-            schemas.insert(
-                "WorkersMetadataResponse".to_string(),
-                Schema::Object {
-                    properties: HashMap::from([
-                        ("workers".to_string(), Schema::Array {
-                            items: Box::new(Schema::Ref {
-                                reference: "#/components/schemas/WorkerMetadata".to_string()
-                            })
-                        }),
-                        ("cursor".to_string(), Schema::String {  // Match yaml exactly
-                            format: None,
-                            enum_values: None
+        components.schemas.insert(
+            "GolemErrorBody".to_string(),
+            ReferenceOr::Item(Schema::Object {
+                properties: HashMap::from([
+                    ("golemError".to_string(), Schema::Ref {
+                        reference: "#/components/schemas/GolemError".to_string()
+                    })
+                ]),
+                required: Some(vec!["golemError".to_string()]),
+                additional_properties: None,
+            })
+        );
+
+       // Add WorkersMetadataResponse
+        components.schemas.insert(
+            "WorkersMetadataResponse".to_string(),
+            ReferenceOr::Item(Schema::Object {
+                properties: HashMap::from([
+                    ("workers".to_string(), Schema::Array {
+                        items: Box::new(Schema::Ref {
+                            reference: "#/components/schemas/WorkerMetadata".to_string()
                         })
-                    ]),
-                    required: Some(vec!["workers".to_string()]),
-                    additional_properties: None
-                }
-            );
-             schemas.insert(
-                "HttpApiDefinitionRequest".to_string(),
-                 Schema::Object {
-                      properties: HashMap::from([
-                        ("id".to_string(), Schema::String { format: None, enum_values: None }),
-                        ("version".to_string(), Schema::String { format: None, enum_values: None }),
-                        ("security".to_string(), Schema::Array { items: Box::new(Schema::String { format: None, enum_values: None }) }),
-                         ("routes".to_string(), Schema::Array {
-                            items: Box::new(Schema::Ref {
-                                reference: "#/components/schemas/RouteRequestData".to_string()
-                            })
-                         }),
-                          ("draft".to_string(), Schema::Boolean)
-                     ]),
-                     required: Some(vec![
-                        "id".to_string(),
-                        "version".to_string(),
-                        "routes".to_string(),
-                        "draft".to_string()
-                    ]),
-                     additional_properties: None
-                }
-            );
-             schemas.insert(
-                "HttpApiDefinitionResponseData".to_string(),
-                 Schema::Object {
-                      properties: HashMap::from([
-                        ("id".to_string(), Schema::String { format: None, enum_values: None }),
-                        ("version".to_string(), Schema::String { format: None, enum_values: None }),
-                         ("routes".to_string(), Schema::Array {
-                            items: Box::new(Schema::Ref {
-                                reference: "#/components/schemas/RouteResponseData".to_string()
-                            })
-                         }),
-                          ("draft".to_string(), Schema::Boolean),
-                        ("createdAt".to_string(), Schema::String { format: Some("date-time".to_string()), enum_values: None }),
-                     ]),
-                     required: Some(vec![
-                        "id".to_string(),
-                        "version".to_string(),
-                        "routes".to_string(),
-                         "draft".to_string(),
-                    ]),
-                     additional_properties: None
-                }
-            );
-            // Add other schemas if necessary
-            Self::collect_common_schemas(routes, schemas);
+                    }),
+                    ("cursor".to_string(), Schema::String {  // Match yaml exactly
+                        format: None,
+                        enum_values: None
+                    })
+                ]),
+                required: Some(vec!["workers".to_string()]),
+                additional_properties: None
+            })
+        );
+         components.schemas.insert(
+            "HttpApiDefinitionRequest".to_string(),
+             ReferenceOr::Item(Schema::Object {
+                  properties: HashMap::from([
+                    ("id".to_string(), Schema::String { format: None, enum_values: None }),
+                    ("version".to_string(), Schema::String { format: None, enum_values: None }),
+                    ("security".to_string(), Schema::Array { items: Box::new(Schema::String { format: None, enum_values: None }) }),
+                     ("routes".to_string(), Schema::Array {
+                        items: Box::new(Schema::Ref {
+                            reference: "#/components/schemas/RouteRequestData".to_string()
+                        })
+                     }),
+                      ("draft".to_string(), Schema::Boolean)
+                 ]),
+                 required: Some(vec![
+                    "id".to_string(),
+                    "version".to_string(),
+                    "routes".to_string(),
+                    "draft".to_string()
+                ]),
+                 additional_properties: None
+            })
+        );
+         components.schemas.insert(
+            "HttpApiDefinitionResponseData".to_string(),
+             ReferenceOr::Item(Schema::Object {
+                  properties: HashMap::from([
+                    ("id".to_string(), Schema::String { format: None, enum_values: None }),
+                    ("version".to_string(), Schema::String { format: None, enum_values: None }),
+                     ("routes".to_string(), Schema::Array {
+                        items: Box::new(Schema::Ref {
+                            reference: "#/components/schemas/RouteResponseData".to_string()
+                        })
+                     }),
+                      ("draft".to_string(), Schema::Boolean),
+                    ("createdAt".to_string(), Schema::String { format: Some("date-time".to_string()), enum_values: None }),
+                 ]),
+                 required: Some(vec![
+                    "id".to_string(),
+                    "version".to_string(),
+                    "routes".to_string(),
+                     "draft".to_string(),
+                ]),
+                 additional_properties: None
+            })
+        );
+        // Add other schemas if necessary
+        let mut type_set = std::collections::HashSet::new();
+        for route in routes {
+            if let BindingType::Default { input_type, output_type, .. } = &route.binding {
+                Self::extract_custom_types(input_type, &mut type_set);
+                Self::extract_custom_types(output_type, &mut type_set);
+            }
         }
 
-        if let Some(security_schemes) = &mut components.security_schemes {
-            security_schemes.insert(
-                "bearerAuth".to_string(),
-                SecurityScheme::Http {
-                    scheme: "bearer".to_string(),
-                    bearer_format: Some("JWT".to_string()),
-                    description: Some("JWT Authorization header".to_string()),
+        for type_name in type_set {
+            if !type_name.starts_with("record{") && !type_name.starts_with("list<")
+                && type_name != "binary" && type_name != "string" && type_name != "i32" 
+                && type_name != "i64" && type_name != "f32" && type_name != "f64" 
+                && type_name != "bool" {
+                components.schemas.insert(
+                    type_name.clone(),
+                    ReferenceOr::Item(Schema::Object {
+                        properties: Self::parse_record_fields(&format!("record{{{}}}", type_name)),
+                        required: None,
+                        additional_properties: None,
+                    })
+                );
+            }
+        }
+
+        // Add security schemes
+        components.security_schemes.insert(
+            "bearerAuth".to_string(),
+            ReferenceOr::Item(SecurityScheme::Http {
+                scheme: "bearer".to_string(),
+                bearer_format: Some("JWT".to_string()),
+                description: Some("JWT Authorization header".to_string()),
+            })
+        );
+
+        // Add common parameters
+        components.parameters.insert(
+            "filter".to_string(),
+            ReferenceOr::Item(Parameter {
+                name: "filter".to_string(),
+                r#in: ParameterLocation::Query,
+                schema: Schema::Array {
+                    items: Box::new(Schema::String {
+                        format: None,
+                        enum_values: None
+                    })
                 },
-            );
-        }
-
+                style: Some("form".to_string()),
+                explode: Some(true),
+                required: Some(false),
+                description: Some("Filter criteria".to_string()),
+            })
+        );
 
         components
     }
@@ -1052,7 +1103,7 @@ impl OpenAPIConverter {
 
     fn extract_custom_types(wit_type: &str, type_set: &mut std::collections::HashSet<String>) {
         match wit_type {
-            "string" | "i32" | "i64" | "f32" | "f64" | "bool" | "binary" => {},
+            "string" | "i32" | "i64" | "f32" | "f64" | "bool" | "binary" => {} ,
             t if t.starts_with("list<") => {
                 let inner_type = &t[5..t.len()-1];
                 Self::extract_custom_types(inner_type, type_set);
