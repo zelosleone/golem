@@ -18,9 +18,10 @@ use golem_api_grpc::proto::golem::component;
 use golem_api_grpc::proto::golem::worker;
 
 use crate::model::{
-    AccountId, ComponentId, IdempotencyKey, PluginInstallationId, PromiseId, TargetWorkerId,
-    WorkerId,
+    AccountId, ComponentId, PluginInstallationId, PromiseId, TargetWorkerId,
 };
+
+use golem_api_grpc::proto::golem::worker::IdempotencyKey;
 
 pub fn proto_component_id_string(component_id: &Option<component::ComponentId>) -> Option<String> {
     (*component_id)

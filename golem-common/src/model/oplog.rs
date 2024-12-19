@@ -14,10 +14,8 @@
 
 use crate::model::regions::OplogRegion;
 use crate::model::RetryConfig;
-use crate::model::{
-    AccountId, ComponentVersion, IdempotencyKey, PluginInstallationId, Timestamp, WorkerId,
-    WorkerInvocation,
-};
+use crate::model::{AccountId, ComponentVersion, PluginInstallationId, Timestamp, WorkerId, WorkerInvocation,};
+use golem_api_grpc::proto::golem::worker::IdempotencyKey;
 use bincode::de::read::Reader;
 use bincode::de::{BorrowDecoder, Decoder};
 use bincode::enc::write::Writer;
@@ -741,7 +739,7 @@ impl OplogEntry {
 #[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
 pub enum UpdateDescription {
     /// Automatic update by replaying the oplog on the new version
-    Automatic { target_version: ComponentVersion },
+    Automatic { target_version: ComponentVersion }
 
     /// Custom update by loading a given snapshot on the new version
     SnapshotBased {

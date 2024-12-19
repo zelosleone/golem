@@ -743,7 +743,7 @@ impl From<golem_api_grpc::proto::golem::apidefinition::GatewayBindingType> for G
                 GatewayBindingType::SwaggerUi
             }
             golem_api_grpc::proto::golem::apidefinition::GatewayBindingType::AuthCallBack => {
-                GatewayBindingType::AuthCallBack
+                GatewayBindingType::AuthCallback
             }
         }
     }
@@ -764,8 +764,8 @@ impl From<GatewayBindingType> for golem_api_grpc::proto::golem::apidefinition::G
             GatewayBindingType::SwaggerUi => {
                 golem_api_grpc::proto::golem::apidefinition::GatewayBindingType::SwaggerUi
             }
-            GatewayBindingType::AuthCallBack => {
-                golem_api_grpc::proto::golem::apidefinition::GatewayBindingType::AuthCallBack
+            GatewayBindingType::AuthCallback => {
+                golem_api_grpc::proto::golem::apidefinition::GatewayBindingType::AuthCallback
             }
         }
     }

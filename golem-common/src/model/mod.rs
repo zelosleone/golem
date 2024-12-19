@@ -29,11 +29,11 @@ use golem_wasm_ast::analysis::analysed_type::{
     field, list, r#enum, record, s64, str, tuple, u32, u64,
 };
 use golem_wasm_ast::analysis::{analysed_type, AnalysedType};
-use golem_wasm_rpc::IntoValue;
+use golem_wasm_rpc::{IntoValue, Value};
 use http::Uri;
 use rand::prelude::IteratorRandom;
 use serde::de::Unexpected;
-use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize, Serializer};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::{Display, Formatter};
@@ -730,7 +730,10 @@ impl IntoValue for WorkerMetadata {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Encode, Decode)]
+#[cfg_attr(feature = "poem", derive(poem_openapi::Object))]
+#[cfg_attr(feature = "poem", oai(rename_all = "camelCase"))]
+#[serde(rename_all = "camelCase")]
 pub struct WorkerResourceDescription {
     pub created_at: Timestamp,
     pub indexed_resource_key: Option<IndexedResourceKey>,
@@ -1013,7 +1016,7 @@ impl IntoValue for WorkerStatus {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Encode, Decode)]
+#[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
 pub enum WorkerInvocation {
     ExportedFunction {
         idempotency_key: IdempotencyKey,
@@ -1110,407 +1113,6 @@ impl IntoValue for AccountId {
 
 pub trait HasAccountId {
     fn account_id(&self) -> AccountId;
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Encode, Decode)]
-#[cfg_attr(feature = "poem", derive(poem_openapi::Object))]
-#[cfg_attr(feature = "poem", oai(rename_all = "camelCase"))]
-#[serde(rename_all = "camelCase")]
-pub struct WorkerNameFilter {
-    pub comparator: StringFilterComparator,
-    pub value: String,
-}
-
-impl WorkerNameFilter {
-    pub fn new(comparator: StringFilterComparator, value: String) -> Self {
-        Self { comparator, value }
-    }
-}
-
-impl Display for WorkerNameFilter {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "name {} {}", self.comparator, self.value)
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Encode, Decode)]
-#[cfg_attr(feature = "poem", derive(poem_openapi::Object))]
-#[cfg_attr(feature = "poem", oai(rename_all = "camelCase"))]
-#[serde(rename_all = "camelCase")]
-pub struct WorkerStatusFilter {
-    pub comparator: FilterComparator,
-    pub value: WorkerStatus,
-}
-
-impl WorkerStatusFilter {
-    pub fn new(comparator: FilterComparator, value: WorkerStatus) -> Self {
-        Self { comparator, value }
-    }
-}
-
-impl Display for WorkerStatusFilter {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "status == {:?}", self.value)
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Encode, Decode)]
-#[cfg_attr(feature = "poem", derive(poem_openapi::Object))]
-#[cfg_attr(feature = "poem", oai(rename_all = "camelCase"))]
-#[serde(rename_all = "camelCase")]
-pub struct WorkerVersionFilter {
-    pub comparator: FilterComparator,
-    pub value: ComponentVersion,
-}
-
-impl WorkerVersionFilter {
-    pub fn new(comparator: FilterComparator, value: ComponentVersion) -> Self {
-        Self { comparator, value }
-    }
-}
-
-impl Display for WorkerVersionFilter {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "version {} {}", self.comparator, self.value)
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Encode, Decode)]
-#[cfg_attr(feature = "poem", derive(poem_openapi::Object))]
-#[cfg_attr(feature = "poem", oai(rename_all = "camelCase"))]
-#[serde(rename_all = "camelCase")]
-pub struct WorkerCreatedAtFilter {
-    pub comparator: FilterComparator,
-    pub value: Timestamp,
-}
-
-impl WorkerCreatedAtFilter {
-    pub fn new(comparator: FilterComparator, value: Timestamp) -> Self {
-        Self { comparator, value }
-    }
-}
-
-impl Display for WorkerCreatedAtFilter {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "created_at {} {}", self.comparator, self.value)
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Encode, Decode)]
-#[cfg_attr(feature = "poem", derive(poem_openapi::Object))]
-#[cfg_attr(feature = "poem", oai(rename_all = "camelCase"))]
-#[serde(rename_all = "camelCase")]
-pub struct WorkerEnvFilter {
-    pub name: String,
-    pub comparator: StringFilterComparator,
-    pub value: String,
-}
-
-impl WorkerEnvFilter {
-    pub fn new(name: String, comparator: StringFilterComparator, value: String) -> Self {
-        Self {
-            name,
-            comparator,
-            value,
-        }
-    }
-}
-
-impl Display for WorkerEnvFilter {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "env.{} {} {}", self.name, self.comparator, self.value)
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Encode, Decode)]
-#[cfg_attr(feature = "poem", derive(poem_openapi::Object))]
-#[cfg_attr(feature = "poem", oai(rename_all = "camelCase"))]
-#[serde(rename_all = "camelCase")]
-pub struct WorkerAndFilter {
-    pub filters: Vec<WorkerFilter>,
-}
-
-impl WorkerAndFilter {
-    pub fn new(filters: Vec<WorkerFilter>) -> Self {
-        Self { filters }
-    }
-}
-
-impl Display for WorkerAndFilter {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "({})",
-            self.filters
-                .iter()
-                .map(|f| f.clone().to_string())
-                .collect::<Vec<String>>()
-                .join(" AND ")
-        )
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Encode, Decode)]
-#[cfg_attr(feature = "poem", derive(poem_openapi::Object))]
-#[cfg_attr(feature = "poem", oai(rename_all = "camelCase"))]
-#[serde(rename_all = "camelCase")]
-pub struct WorkerOrFilter {
-    pub filters: Vec<WorkerFilter>,
-}
-
-impl WorkerOrFilter {
-    pub fn new(filters: Vec<WorkerFilter>) -> Self {
-        Self { filters }
-    }
-}
-
-impl Display for WorkerOrFilter {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "({})",
-            self.filters
-                .iter()
-                .map(|f| f.clone().to_string())
-                .collect::<Vec<String>>()
-                .join(" OR ")
-        )
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Encode, Decode)]
-#[cfg_attr(feature = "poem", derive(poem_openapi::Object))]
-#[cfg_attr(feature = "poem", oai(rename_all = "camelCase"))]
-#[serde(rename_all = "camelCase")]
-pub struct WorkerNotFilter {
-    filter: Box<WorkerFilter>,
-}
-
-impl WorkerNotFilter {
-    pub fn new(filter: WorkerFilter) -> Self {
-        Self {
-            filter: Box::new(filter),
-        }
-    }
-}
-
-impl Display for WorkerNotFilter {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "NOT ({})", self.filter)
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Encode, Decode)]
-#[cfg_attr(feature = "poem", derive(poem_openapi::Union))]
-#[cfg_attr(feature = "poem", oai(discriminator_name = "type", one_of = true))]
-#[serde(tag = "type")]
-pub enum WorkerFilter {
-    Name(WorkerNameFilter),
-    Status(WorkerStatusFilter),
-    Version(WorkerVersionFilter),
-    CreatedAt(WorkerCreatedAtFilter),
-    Env(WorkerEnvFilter),
-    And(WorkerAndFilter),
-    Or(WorkerOrFilter),
-    Not(WorkerNotFilter),
-}
-
-impl WorkerFilter {
-    pub fn and(&self, filter: WorkerFilter) -> Self {
-        match self.clone() {
-            WorkerFilter::And(WorkerAndFilter { filters }) => {
-                Self::new_and([filters, vec![filter]].concat())
-            }
-            f => Self::new_and(vec![f, filter]),
-        }
-    }
-
-    pub fn or(&self, filter: WorkerFilter) -> Self {
-        match self.clone() {
-            WorkerFilter::Or(WorkerOrFilter { filters }) => {
-                Self::new_or([filters, vec![filter]].concat())
-            }
-            f => Self::new_or(vec![f, filter]),
-        }
-    }
-
-    pub fn not(&self) -> Self {
-        Self::new_not(self.clone())
-    }
-
-    pub fn matches(&self, metadata: &WorkerMetadata) -> bool {
-        match self.clone() {
-            WorkerFilter::Name(WorkerNameFilter { comparator, value }) => {
-                comparator.matches(&metadata.worker_id.worker_name, &value)
-            }
-            WorkerFilter::Version(WorkerVersionFilter { comparator, value }) => {
-                let version: ComponentVersion = metadata.last_known_status.component_version;
-                comparator.matches(&version, &value)
-            }
-            WorkerFilter::Env(WorkerEnvFilter {
-                name,
-                comparator,
-                value,
-            }) => {
-                let mut result = false;
-                let name = name.to_lowercase();
-                for env_value in metadata.env.clone() {
-                    if env_value.0.to_lowercase() == name {
-                        result = comparator.matches(&env_value.1, &value);
-
-                        break;
-                    }
-                }
-                result
-            }
-            WorkerFilter::CreatedAt(WorkerCreatedAtFilter { comparator, value }) => {
-                comparator.matches(&metadata.created_at, &value)
-            }
-            WorkerFilter::Status(WorkerStatusFilter { comparator, value }) => {
-                comparator.matches(&metadata.last_known_status.status, &value)
-            }
-            WorkerFilter::Not(WorkerNotFilter { filter }) => !filter.matches(metadata),
-            WorkerFilter::And(WorkerAndFilter { filters }) => {
-                let mut result = true;
-                for filter in filters {
-                    if !filter.matches(metadata) {
-                        result = false;
-                        break;
-                    }
-                }
-                result
-            }
-            WorkerFilter::Or(WorkerOrFilter { filters }) => {
-                let mut result = true;
-                if !filters.is_empty() {
-                    result = false;
-                    for filter in filters {
-                        if filter.matches(metadata) {
-                            result = true;
-                            break;
-                        }
-                    }
-                }
-                result
-            }
-        }
-    }
-
-    pub fn new_and(filters: Vec<WorkerFilter>) -> Self {
-        WorkerFilter::And(WorkerAndFilter::new(filters))
-    }
-
-    pub fn new_or(filters: Vec<WorkerFilter>) -> Self {
-        WorkerFilter::Or(WorkerOrFilter::new(filters))
-    }
-
-    pub fn new_not(filter: WorkerFilter) -> Self {
-        WorkerFilter::Not(WorkerNotFilter::new(filter))
-    }
-
-    pub fn new_name(comparator: StringFilterComparator, value: String) -> Self {
-        WorkerFilter::Name(WorkerNameFilter::new(comparator, value))
-    }
-
-    pub fn new_env(name: String, comparator: StringFilterComparator, value: String) -> Self {
-        WorkerFilter::Env(WorkerEnvFilter::new(name, comparator, value))
-    }
-
-    pub fn new_version(comparator: FilterComparator, value: ComponentVersion) -> Self {
-        WorkerFilter::Version(WorkerVersionFilter::new(comparator, value))
-    }
-
-    pub fn new_status(comparator: FilterComparator, value: WorkerStatus) -> Self {
-        WorkerFilter::Status(WorkerStatusFilter::new(comparator, value))
-    }
-
-    pub fn new_created_at(comparator: FilterComparator, value: Timestamp) -> Self {
-        WorkerFilter::CreatedAt(WorkerCreatedAtFilter::new(comparator, value))
-    }
-
-    pub fn from(filters: Vec<String>) -> Result<WorkerFilter, String> {
-        let mut fs = Vec::new();
-        for f in filters {
-            fs.push(WorkerFilter::from_str(&f)?);
-        }
-        Ok(WorkerFilter::new_and(fs))
-    }
-}
-
-impl Display for WorkerFilter {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            WorkerFilter::Name(filter) => {
-                write!(f, "{}", filter)
-            }
-            WorkerFilter::Version(filter) => {
-                write!(f, "{}", filter)
-            }
-            WorkerFilter::Status(filter) => {
-                write!(f, "{}", filter)
-            }
-            WorkerFilter::CreatedAt(filter) => {
-                write!(f, "{}", filter)
-            }
-            WorkerFilter::Env(filter) => {
-                write!(f, "{}", filter)
-            }
-            WorkerFilter::Not(filter) => {
-                write!(f, "{}", filter)
-            }
-            WorkerFilter::And(filter) => {
-                write!(f, "{}", filter)
-            }
-            WorkerFilter::Or(filter) => {
-                write!(f, "{}", filter)
-            }
-        }
-    }
-}
-
-impl FromStr for WorkerFilter {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let elements = s.split_whitespace().collect::<Vec<&str>>();
-
-        if elements.len() == 3 {
-            let arg = elements[0];
-            let comparator = elements[1];
-            let value = elements[2];
-            match arg {
-                "name" => Ok(WorkerFilter::new_name(
-                    comparator.parse()?,
-                    value.to_string(),
-                )),
-                "version" => Ok(WorkerFilter::new_version(
-                    comparator.parse()?,
-                    value
-                        .parse()
-                        .map_err(|e| format!("Invalid filter value: {}", e))?,
-                )),
-                "status" => Ok(WorkerFilter::new_status(
-                    comparator.parse()?,
-                    value.parse()?,
-                )),
-                "created_at" | "createdAt" => Ok(WorkerFilter::new_created_at(
-                    comparator.parse()?,
-                    value.parse()?,
-                )),
-                _ if arg.starts_with("env.") => {
-                    let name = &arg[4..];
-                    Ok(WorkerFilter::new_env(
-                        name.to_string(),
-                        comparator.parse()?,
-                        value.to_string(),
-                    ))
-                }
-                _ => Err(format!("Invalid filter: {}", s)),
-            }
-        } else {
-            Err(format!("Invalid filter: {}", s))
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Encode, Decode)]
@@ -1887,7 +1489,7 @@ impl Display for WorkerEvent {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "poem", derive(poem_openapi::Enum))]
 #[repr(i32)]
 pub enum ComponentType {
@@ -1929,7 +1531,7 @@ impl FromStr for ComponentType {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "poem", derive(poem_openapi::Object))]
 #[cfg_attr(feature = "poem", oai(rename_all = "camelCase"))]
 #[serde(rename_all = "camelCase")]
@@ -2015,6 +1617,99 @@ impl<'de> Deserialize<'de> for ComponentFilePath {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum ComponentFileSystemNodeDetails {
+    File {
+        permissions: ComponentFilePermissions,
+        size: u64,
+    },
+    Directory,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ComponentFileSystemNode {
+    pub name: String,
+    pub last_modified: SystemTime,
+    pub details: ComponentFileSystemNodeDetails,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Encode, Decode, Default)]
+#[cfg_attr(feature = "poem", derive(poem_openapi::Enum))]
+#[serde(rename_all = "kebab-case")]
+#[cfg_attr(feature = "poem", oai(rename_all = "kebab-case"))]
+pub enum GatewayBindingType {
+    #[default]
+    Default,
+    FileServer,
+    CorsPreflight,
+    AuthCallback,
+    SwaggerUi,
+}
+
+// To keep backward compatibility as we documented wit-worker to be default
+impl<'de> Deserialize<'de> for GatewayBindingType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct GatewayBindingTypeVisitor;
+
+        impl de::Visitor<'_> for GatewayBindingTypeVisitor {
+            type Value = GatewayBindingType;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a string representing the binding type")
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                match value {
+                    "default" | "wit-worker" => Ok(GatewayBindingType::Default),
+                    "file-server" => Ok(GatewayBindingType::FileServer),
+                    "cors-preflight" => Ok(GatewayBindingType::CorsPreflight),
+                    "auth-callback" => Ok(GatewayBindingType::AuthCallback),
+                    "swagger-ui" => Ok(GatewayBindingType::SwaggerUi),
+                    _ => Err(de::Error::invalid_value(Unexpected::Str(value), &self)),
+                }
+            }
+        }
+
+        deserializer.deserialize_str(GatewayBindingTypeVisitor)
+    }
+}
+
+impl TryFrom<String> for GatewayBindingType {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        match value.as_str() {
+            "default" => Ok(GatewayBindingType::Default),
+            "file-server" => Ok(GatewayBindingType::FileServer),
+            "cors-preflight" => Ok(GatewayBindingType::CorsPreflight),
+            "auth-callback" => Ok(GatewayBindingType::AuthCallback),
+            "swagger-ui" => Ok(GatewayBindingType::SwaggerUi),
+            _ => Err(format!("Invalid WorkerBindingType: {}", value)),
+        }
+    }
+}
+
+impl FromStr for GatewayBindingType {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "default" | "wit-worker" => Ok(GatewayBindingType::Default),
+            "file-server" => Ok(GatewayBindingType::FileServer),
+            "cors-preflight" => Ok(GatewayBindingType::CorsPreflight),
+            "auth-callback" => Ok(GatewayBindingType::AuthCallback),
+            "swagger-ui" => Ok(GatewayBindingType::SwaggerUi),
+            _ => Err(format!("Invalid WorkerBindingType: {}", value)),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "poem", derive(poem_openapi::Enum))]
 #[serde(rename_all = "kebab-case")]
@@ -2091,78 +1786,89 @@ impl Display for ComponentFilePathWithPermissionsList {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub enum ComponentFileSystemNodeDetails {
-    File {
-        permissions: ComponentFilePermissions,
-        size: u64,
-    },
-    Directory,
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Encode, Decode)]
+pub struct IdempotencyKey {
+    pub value: String,
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct ComponentFileSystemNode {
-    pub name: String,
-    pub last_modified: SystemTime,
-    pub details: ComponentFileSystemNodeDetails,
+impl IdempotencyKey {
+    const ROOT_NS: Uuid = uuid!("9C19B15A-C83D-46F7-9BC3-EAD7923733F4");
+
+    pub fn new(value: String) -> Self {
+        Self { value }
+    }
+
+    pub fn from_uuid(value: Uuid) -> Self {
+        Self {
+            value: value.to_string(),
+        }
+    }
+
+    pub fn fresh() -> Self {
+        Self::from_uuid(Uuid::new_v4())
+    }
+
+    /// Generates a deterministic new idempotency key using a base idempotency key and an oplog index.
+    ///
+    /// The base idempotency key determines the "namespace" of the generated key UUIDv5. If
+    /// the base idempotency key is already an UUID, it is directly used as the namespace of the v5 algorithm,
+    /// while the name part is derived from the given oplog index.
+    ///
+    /// If the base idempotency key is not an UUID (as it can be an arbitrary user-provided string), then first
+    /// we generate a UUIDv5 in the ROOT_NS namespace and use that as unique namespace for generating
+    /// the new idempotency key.
+    pub fn derived(base: &IdempotencyKey, oplog_index: OplogIndex) -> Self {
+        let namespace = if let Ok(base_uuid) = Uuid::parse_str(&base.value) {
+            base_uuid
+        } else {
+            Uuid::new_v5(&Self::ROOT_NS, base.value.as_bytes())
+        };
+        let name = format!("oplog-index-{}", oplog_index);
+        Self::from_uuid(Uuid::new_v5(&namespace, name.as_bytes()))
+    }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Encode, Decode, Default)]
-#[cfg_attr(feature = "poem", derive(poem_openapi::Enum))]
-#[serde(rename_all = "kebab-case")]
-#[cfg_attr(feature = "poem", oai(rename_all = "kebab-case"))]
-pub enum GatewayBindingType {
-    #[default]
-    Default,
-    FileServer,
-    CorsPreflight,
-    SwaggerUi,
-}
-
-// To keep backward compatibility as we documented wit-worker to be default
-impl<'de> Deserialize<'de> for GatewayBindingType {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+impl Serialize for IdempotencyKey {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
-        D: Deserializer<'de>,
+        S: Serializer,
     {
-        struct GatewayBindingTypeVisitor;
-
-        impl de::Visitor<'_> for GatewayBindingTypeVisitor {
-            type Value = GatewayBindingType;
-
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                formatter.write_str("a string representing the binding type")
-            }
-
-            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                match value {
-                    "default" | "wit-worker" => Ok(GatewayBindingType::Default),
-                    "file-server" => Ok(GatewayBindingType::FileServer),
-                    "cors-preflight" => Ok(GatewayBindingType::CorsPreflight),
-                    "swagger-ui" => Ok(GatewayBindingType::SwaggerUi),
-                    _ => Err(de::Error::invalid_value(Unexpected::Str(value), &self)),
-                }
-            }
-        }
-
-        deserializer.deserialize_str(GatewayBindingTypeVisitor)
+        self.value.serialize(serializer)
     }
 }
 
-impl TryFrom<String> for GatewayBindingType {
-    type Error = String;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        match value.as_str() {
-            "default" => Ok(GatewayBindingType::Default),
-            "file-server" => Ok(GatewayBindingType::FileServer),
-            "swagger-ui" => Ok(GatewayBindingType::SwaggerUi),
-            _ => Err(format!("Invalid WorkerBindingType: {}", value)),
-        }
+impl<'de> Deserialize<'de> for IdempotencyKey {
+    fn deserialize<D>(deserializer: D) -> Result<IdempotencyKey, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Ok(IdempotencyKey { value })
     }
 }
 
-```
+impl IntoValue for IdempotencyKey {
+    fn into_value(self) -> golem_wasm_rpc::Value {
+        golem_wasm_rpc::Value::String(self.value)
+    }
+
+    fn get_type() -> AnalysedType {
+        analysed_type::str()
+    }
+}
+
+impl Display for IdempotencyKey {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.value)
+    }
+}
+
+pub mod oplog;
+pub mod poem;
+pub mod protobuf;
+pub mod public_oplog;
+
+pub use oplog::*;
+pub use poem::*;
+pub use protobuf::*;
+pub use public_oplog::*;

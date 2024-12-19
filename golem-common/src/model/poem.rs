@@ -13,8 +13,9 @@
 // limitations under the License.
 
 use crate::model::{
-    AccountId, ComponentFilePath, ComponentFilePathWithPermissionsList, IdempotencyKey, Timestamp,
+    AccountId, ComponentFilePath, ComponentFilePathWithPermissionsList, Timestamp,
 };
+use golem_api_grpc::proto::golem::worker::IdempotencyKey;
 use poem_openapi::registry::{MetaSchema, MetaSchemaRef};
 use poem_openapi::types::{ParseFromJSON, ParseFromParameter, ParseResult, ToJSON};
 use serde_json::Value;
