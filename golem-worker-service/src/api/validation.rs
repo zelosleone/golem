@@ -1,7 +1,7 @@
 use crate::api::definition::types::{ApiDefinition, BindingType};
 use golem_wasm_ast::analysis::{
-    AnalysedType, TypeF32, TypeF64, TypeBool, TypeList, TypeOption, 
-    TypeRecord, TypeResult, NameTypePair, TypeStr,
+    AnalysedType, TypeStr, TypeI32, TypeI64, TypeF32, TypeF64, TypeBool, 
+    TypeList, TypeOption, TypeRecord, TypeResult, NameTypePair, TypeVoid
 };
 
 pub fn validate_api_definition(api: &ApiDefinition) -> Result<(), String> {
@@ -22,9 +22,12 @@ pub fn validate_api_definition(api: &ApiDefinition) -> Result<(), String> {
 fn parse_type(type_str: &str) -> Result<AnalysedType, String> {
     match type_str {
         "string" => Ok(AnalysedType::Str(TypeStr)),
+        "i32" => Ok(AnalysedType::Int32(TypeI32)),
+        "i64" => Ok(AnalysedType::Int64(TypeI64)), 
         "f32" => Ok(AnalysedType::F32(TypeF32)),
         "f64" => Ok(AnalysedType::F64(TypeF64)),
         "bool" => Ok(AnalysedType::Bool(TypeBool)),
+        "void" => Ok(AnalysedType::Void(TypeVoid)),
         t if t.starts_with("list<") => {
             let inner_type = t.trim_start_matches("list<").trim_end_matches('>');
             let inner = parse_type(inner_type)?;
@@ -65,7 +68,6 @@ fn parse_type(type_str: &str) -> Result<AnalysedType, String> {
                 Err(format!("Invalid result type format: {}", t))
             }
         },
-        "i32" | "i64" | "void" => Err(format!("Unsupported type: {}", type_str)),
         _ => Err(format!("Unsupported type: {}", type_str))
     }
 }

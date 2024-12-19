@@ -11,6 +11,7 @@ use axum::{
 };
 use tracing::{error, info};
 use crate::service::api::Cache;
+use openapiv3::OpenAPI;
 
 #[derive(Clone)]
 pub struct OpenAPIExportConfig {
@@ -44,7 +45,6 @@ fn convert_method(method: &MethodPattern) -> HttpMethod {
         MethodPattern::Patch => HttpMethod::Patch,
         MethodPattern::Head => HttpMethod::Head,
         MethodPattern::Options => HttpMethod::Options,
-        // Removed Trace and Connect as they are not supported
         // Provide a default case to handle unexpected variants
         _ => {
             error!("Unsupported HTTP method encountered: {:?}", method);
@@ -56,7 +56,6 @@ fn convert_method(method: &MethodPattern) -> HttpMethod {
 fn convert_binding(binding: &GatewayBindingCompiled) -> BindingType {
     match binding {
         GatewayBindingCompiled::Worker(_) => BindingType::Worker,
-        // Removed Http and Proxy as they are not supported
         // Provide a default case to handle unexpected variants
         _ => {
             error!("Unsupported binding type encountered: {:?}", binding);
@@ -68,85 +67,30 @@ fn convert_binding(binding: &GatewayBindingCompiled) -> BindingType {
 pub async fn export_openapi(
     State(services): State<crate::service::Services>,
     Path((id, version)): Path<(String, String)>,
-) -> Result<Json<OpenAPISpec>, StatusCode> {
+) -> Result<Json<OpenAPI>, StatusCode> {
     info!("Requesting OpenAPI spec for API {}, version {}", id, version);
 
     // Try to get from cache first
     let cache_key = format!("openapi:{}:{}", id, version);
-    if let Some(cached_spec) = services
-        .cache
-        .get::<OpenAPISpec>(&cache_key)
-        .await
-        .map_err(|e| {
-            error!("Cache error: {}", e);
-            <OpenAPIError as Into<StatusCode>>::into(OpenAPIError::CacheError(e.to_string()))
-        })?
-    {
-        info!("Returning cached OpenAPI spec for {}", id);
+    if let Some(cached_spec) = services.cache.get(&cache_key).await? {
         return Ok(Json(cached_spec));
     }
 
-    // Fetch API definition if not in cache
-    let namespace = DefaultNamespace::default(); // Create an instance instead of using the type
-    let api_def = services
-        .definition_service
-        .get(
-            &ApiDefinitionId(id.clone()),
-            &ApiVersion(version.clone()),
-            &namespace,
-            &EmptyAuthCtx::default(),
-        )
-        .await
-        .map_err(|e| {
-            error!("Failed to fetch API definition: {}", e);
-            <OpenAPIError as Into<StatusCode>>::into(OpenAPIError::InvalidDefinition(e.to_string()))
-        })?
-        .ok_or_else(|| {
-            error!("API definition not found");
-            <OpenAPIError as Into<StatusCode>>::into(OpenAPIError::InvalidDefinition(
-                "API definition not found".to_string(),
-            ))
-        })?;
+    // Convert API definition to OpenAPI spec
+    let api_def = services.definition_service.get(
+        &ApiDefinitionId(id.clone()),
+        &ApiVersion(version.clone()),
+        &namespace,
+        &EmptyAuthCtx::default(),
+    ).await?;
 
-    // Convert CompiledHttpApiDefinition to ApiDefinition
-    let api_id = api_def.id.0.clone();
-    let api_definition = ApiDefinition {
-        id: api_id.clone(),
-        name: api_def.id.0.clone(), // Using 'id' as 'name' since 'name' field doesn't exist
-        version: api_def.version.0.clone(),
-        description: "".to_string(), // Providing a default empty description
-        routes: api_def
-            .routes
-            .iter()
-            .map(|r| Route {
-                path: r.path.to_string(),
-                method: convert_method(&r.method),
-                description: "".to_string(), // Providing a default empty description
-                template_name: "".to_string(), // Providing a default empty template_name
-                binding: convert_binding(&r.binding),
-            })
-            .collect(),
-    };
+    let spec = OpenAPIConverter::convert(&api_def);
 
-    // Convert to OpenAPI spec
-    let spec = OpenAPIConverter::convert(&api_definition);
-
-    // Validate the generated spec
-    validate_openapi(&spec).map_err(|e| {
-        error!("OpenAPI spec validation failed: {}", e);
-        StatusCode::from(OpenAPIError::ValidationFailed(e))
-    })?;
+    // Validate the spec
+    validate_openapi(&spec)?;
 
     // Cache the valid spec
-    services
-        .cache
-        .set(&cache_key, &spec)
-        .await
-        .map_err(|e| {
-            error!("Failed to cache OpenAPI spec: {}", e);
-            StatusCode::from(OpenAPIError::CacheError(e.to_string()))
-        })?;
+    services.cache.set(&cache_key, &spec).await?;
 
-    info!("Successfully generated and cached OpenAPI spec for {}", id);
     Ok(Json(spec))
 }
