@@ -20,6 +20,9 @@ use bincode::enc::Encoder;
 use bincode::error::{DecodeError, EncodeError};
 use golem_wasm_ast::analysis::analysed_type::*;
 use golem_wasm_rpc::IntoValue;
+use golem_api_grpc::proto::golem::worker::{PromiseId as GrpcPromiseId, ShardId};
+use golem_api_grpc::proto::golem::worker::RoutingTableEntry as GrpcRoutingTableEntry;
+use golem_api_grpc::proto::golem::common::StringFilterComparator as GrpcStringFilterComparator;
 use http::Uri;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde::de::{self, Unexpected, Visitor};
@@ -31,12 +34,7 @@ use std::str::{self, FromStr};
 use std::time::{Duration, SystemTime};
 use typed_path::Utf8UnixPathBuf;
 use url::Url;
-use uuid::uuid;
-use uuid::Uuid;
-use golem_api_grpc::proto::golem::worker::{PromiseId, ShardId};
-use golem_api_grpc::proto::golem::shardmanager::{Pod, RoutingTableEntry, RoutingTable};
-use golem_api_grpc::proto::golem::common::StringFilterComparator;
-use crate::model::{PromiseId, ShardId, Pod, RoutingTableEntry, RoutingTable, StringFilterComparator};
+use uuid::{uuid, Uuid};
 
 pub mod api_types;
 pub mod component;
@@ -54,6 +52,54 @@ pub use protobuf::*;
 pub use regions::*;
 pub use snapshot::*;
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PromiseId(GrpcPromiseId);
+
+impl Display for PromiseId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "PromiseId({})", self.0)
+    }
+}
+
+impl From<GrpcPromiseId> for PromiseId {
+    fn from(grpc_id: GrpcPromiseId) -> Self {
+        PromiseId(grpc_id)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StringFilterComparator(GrpcStringFilterComparator);
+
+impl Display for StringFilterComparator {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "StringFilterComparator({:?})", self.0)
+    }
+}
+
+impl From<GrpcStringFilterComparator> for StringFilterComparator {
+    fn from(grpc_comparator: GrpcStringFilterComparator) -> Self {
+        StringFilterComparator(grpc_comparator)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RoutingTableEntry {
+    pub worker_id: String,
+    pub shard_id: ShardId,
+    pub last_seen: SystemTime,
+}
+
+impl From<GrpcRoutingTableEntry> for RoutingTableEntry {
+    fn from(grpc_entry: GrpcRoutingTableEntry) -> Self {
+        RoutingTableEntry {
+            worker_id: grpc_entry.worker_id,
+            shard_id: grpc_entry.shard_id.unwrap_or_default(),
+            last_seen: grpc_entry.last_seen
+                .map(|t| SystemTime::UNIX_EPOCH + Duration::from_secs(t as u64))
+                .unwrap_or_else(SystemTime::now),
+        }
+    }
+}
 #[cfg(feature = "poem")]
 pub trait PoemTypeRequirements:
     poem_openapi::types::Type + poem_openapi::types::ParseFromJSON + poem_openapi::types::ToJSON

@@ -22,7 +22,7 @@ use crate::model::{
     StringFilterComparator, ApiWorkerId
 };
 use golem_api_grpc::proto::golem::worker::{
-    WorkerFilter as GrpcWorkerFilter, FileSystemNode, PromiseId as GrpcPromiseId, ShardId as GrpcShardId
+    WorkerFilter as GrpcWorkerFilter, FileSystemNode, PromiseId as GrpcPromiseId
 };
 use golem_api_grpc::proto::golem::common::{
     FilterComparator as GrpcFilterComparator, 
@@ -33,7 +33,7 @@ use golem_api_grpc::proto::golem::component::{
     InitialComponentFile as GrpcInitialComponentFile
 };
 use golem_api_grpc::proto::golem::shardmanager::{
-    Pod as GrpcPod, RoutingTable as GrpcRoutingTable, RoutingTableEntry as GrpcRoutingTableEntry
+    Pod as GrpcPod, RoutingTable as GrpcRoutingTable, RoutingTableEntry as GrpcRoutingTableEntry, ShardId as GrpcShardId
 };
 use std::ops::Add;
 use std::time::{Duration, SystemTime};
@@ -122,7 +122,7 @@ impl TryFrom<golem_api_grpc::proto::golem::worker::PromiseId> for PromiseId {
     }
 }
 
-impl From<ShardId> for golem_api_grpc::proto::golem::shardmanager::ShardId {
+impl From<ShardId> for GrpcShardId {
     fn from(value: ShardId) -> Self {
         Self {
             id: value.id,
@@ -130,8 +130,8 @@ impl From<ShardId> for golem_api_grpc::proto::golem::shardmanager::ShardId {
     }
 }
 
-impl From<golem_api_grpc::proto::golem::shardmanager::ShardId> for ShardId {
-    fn from(value: golem_api_grpc::proto::golem::shardmanager::ShardId) -> Self {
+impl From<GrpcShardId> for ShardId {
+    fn from(value: GrpcShardId) -> Self {
         Self {
             id: value.id,
         }
@@ -149,7 +149,11 @@ impl From<GrpcPod> for Pod {
 impl From<GrpcRoutingTableEntry> for RoutingTableEntry {
     fn from(value: GrpcRoutingTableEntry) -> Self {
         Self {
+            // Assuming fields exist in both structs
             id: value.id,
+            shard_id: value.shard_id.map(ShardId::from),
+            shard_count: value.shard_count,
+            filter: value.filter.map(StringFilterComparator::from),
         }
     }
 }
@@ -228,6 +232,29 @@ impl From<StringFilterComparator> for GrpcStringFilterComparator {
             StringFilterComparator::NotEqual => GrpcStringFilterComparator::StringNotEqual,
             StringFilterComparator::Like => GrpcStringFilterComparator::StringLike,
             StringFilterComparator::NotLike => GrpcStringFilterComparator::StringNotLike,
+        }
+    }
+}
+
+impl From<GrpcRoutingTableEntry> for RoutingTableEntry {
+    fn from(value: GrpcRoutingTableEntry) -> Self {
+        Self {
+            // Assuming fields exist in both structs
+            id: value.id,
+            shard_id: value.shard_id.map(ShardId::from),
+            shard_count: value.shard_count,
+            filter: value.filter.map(StringFilterComparator::from),
+        }
+    }
+}
+
+impl From<GrpcStringFilterComparator> for StringFilterComparator {
+    fn from(value: GrpcStringFilterComparator) -> Self {
+        match value {
+            GrpcStringFilterComparator::Equal => StringFilterComparator::Equal,
+            GrpcStringFilterComparator::NotEqual => StringFilterComparator::NotEqual,
+            GrpcStringFilterComparator::Like => StringFilterComparator::Like,
+            GrpcStringFilterComparator::NotLike => StringFilterComparator::NotLike,
         }
     }
 }
