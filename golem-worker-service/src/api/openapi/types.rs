@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
+use openapiv3::{ReferenceOr, Schema};
+use indexmap::IndexMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpenAPISpec {
@@ -146,4 +148,30 @@ pub struct OAuthFlow {
     pub token_url: Option<String>,
     pub refresh_url: Option<String>,
     pub scopes: HashMap<String, String>
+}
+
+pub trait IntoRaw<T> {
+    fn into_raw(self) -> T;
+}
+
+impl IntoRaw<openapiv3::Parameter> for Parameter {
+    fn into_raw(self) -> openapiv3::Parameter {
+        openapiv3::Parameter::Query {
+            parameter_data: openapiv3::ParameterData {
+                name: self.name,
+                description: self.description,
+                required: self.required.unwrap_or(false),
+                deprecated: None,
+                format: openapiv3::ParameterSchemaOrContent::Schema(Box::new(ReferenceOr::Item(
+                    self.schema.into_raw(),
+                ))),
+                example: None,
+                examples: IndexMap::new(),
+                extensions: IndexMap::new(),
+            },
+            style: self.style.map(|s| s.into()),
+            allow_reserved: false,
+            allow_empty_value: None,
+        }
+    }
 }

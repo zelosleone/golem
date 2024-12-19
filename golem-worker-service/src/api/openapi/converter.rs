@@ -1,8 +1,8 @@
 use crate::api::definition::types::{ApiDefinition, Route, HttpMethod, BindingType};
 use crate::api::definition::patterns::{AllPathPatterns, PathPattern};
 use golem_wasm_ast::analysis::{
-    AnalysedType, // Ensure this includes Bool, S8, U8, S16, U16, S32, U32, S64, U64, F32, F64, Chr, Str, List, Tuple, Record, Flags, Enum
-    TypeStr, TypeBool, TypeList, TypeRecord, // and other related types if needed
+    AnalysedType,
+    TypeStr, TypeBool, TypeList, TypeRecord,
 };
 use openapiv3::{
     OpenAPI as OpenAPISpec, Info, Paths, Operation, PathItem,
@@ -199,10 +199,10 @@ impl OpenAPIConverter {
                         },
                         style: Some("matrix".to_string()),
                         explode: Some(true),
-                        description: Some(format!(
+                        description: Some(format![
                             "Multi-segment catch-all parameter for {}",
                             info.key_name
-                        ))
+                        ])
                     })
                 },
                 _ => None
@@ -285,45 +285,52 @@ impl OpenAPIConverter {
         responses
     }
 
-    fn create_cors_headers(_cors_allowed_origins: &str) -> IndexMap<String, ReferenceOr<Header>> {
+    fn create_cors_headers(allowed_origins: &str) -> IndexMap<String, ReferenceOr<Header>> {
         let mut headers = IndexMap::new();
-        let cors_header_schema = Schema {
-            schema_data: Default::default(),
-            schema_kind: openapiv3::SchemaKind::Type(openapiv3::Type::String(StringType {
-                format: None,
-                pattern: None,
-                enumeration: vec![],
-                min_length: None,
-                max_length: None,
-            })),
-        };
-
-        let cors_header = Header {
+        let header = Header {
             description: None,
             required: false,
             deprecated: None,
-            format: openapiv3::ParameterSchemaOrContent::Schema(Box::new(
-                ReferenceOr::Item(cors_header_schema)
+            style: HeaderStyle::Simple,
+            schema_or_content: openapiv3::ParameterSchemaOrContent::Schema(ReferenceOr::Item(
+                Schema {
+                    schema_data: Default::default(),
+                    schema_kind: openapiv3::SchemaKind::Type(openapiv3::Type::String(StringType {
+                        format: None,
+                        pattern: None,
+                        enumeration: vec![Some(allowed_origins.to_string())],
+                        min_length: None,
+                        max_length: None,
+                    }))
+                }
             )),
             example: None,
-            examples: Default::default(),
-            extensions: Default::default(),
+            examples: IndexMap::new(),
+            extensions: IndexMap::new(),
         };
         
-        for header_name in [
-            "Access-Control-Allow-Origin",
-            "Access-Control-Allow-Methods",
-            "Access-Control-Allow-Headers",
-            "Access-Control-Max-Age",
-            "Access-Control-Expose-Headers",
-        ] {
-            headers.insert(
-                header_name.to_string(),
-                ReferenceOr::Item(cors_header.clone())
-            );
-        }
+        headers.insert(
+            "Access-Control-Allow-Origin".to_string(),
+            ReferenceOr::Item(header.clone())
+        );
+        headers.insert(
+            "Access-Control-Allow-Methods".to_string(), 
+            ReferenceOr::Item(header.clone())
+        );
+        headers.insert(
+            "Access-Control-Allow-Headers".to_string(),
+            ReferenceOr::Item(header.clone())
+        );
+        headers.insert(
+            "Access-Control-Max-Age".to_string(),
+            ReferenceOr::Item(header.clone())
+        );
+        headers.insert(
+            "Access-Control-Allow-Credentials".to_string(),
+            ReferenceOr::Item(header.clone())
+        );
         headers
-    }
+        }
 
     fn create_components(_routes: &[Route]) -> Components {
         Components {
@@ -381,7 +388,12 @@ impl OpenAPIConverter {
 
 fn analysed_type_to_schema(typ: &AnalysedType) -> ReferenceOr<Schema> {
     match typ {
-        AnalysedType::Bool(_) => boolean_schema(),
+        AnalysedType::Bool(_) => ReferenceOr::Item(Schema {
+            schema_data: Default::default(),
+            schema_kind: openapiv3::SchemaKind::Type(openapiv3::Type::Boolean {
+                enumeration: vec![]
+            })
+        }),
         AnalysedType::S8(_) | AnalysedType::S16(_) | AnalysedType::S32(_) | AnalysedType::S64(_)
         | AnalysedType::U8(_) | AnalysedType::U16(_) | AnalysedType::U32(_) | AnalysedType::U64(_) => integer_schema(None),
         AnalysedType::F32(_) | AnalysedType::F64(_) => number_schema(None),
