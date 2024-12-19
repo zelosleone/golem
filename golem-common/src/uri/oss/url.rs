@@ -12,15 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::model::ComponentVersion;
-use crate::uri::{
-    try_from_golem_url, urldecode, GolemUrl, GolemUrlTransformError, TypedGolemUrl,
-    API_DEFINITION_TYPE_NAME, API_DEPLOYMENT_TYPE_NAME, COMPONENT_TYPE_NAME, WORKER_TYPE_NAME,
-};
-use crate::url_from_into;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use std::fmt::{Display, Formatter};
-use std::str::FromStr;
+use crate::uri::cloud::url::ResourceUrl;
+use crate::model::AccountId;
+use golem_api_grpc::proto::golem::{component::ComponentId, worker::WorkerId};
 
 /// Typed Golem URL for component
 ///
