@@ -739,8 +739,11 @@ impl From<golem_api_grpc::proto::golem::apidefinition::GatewayBindingType> for G
             golem_api_grpc::proto::golem::apidefinition::GatewayBindingType::CorsPreflight => {
                 GatewayBindingType::CorsPreflight
             }
+            golem_api_grpc::proto::golem::apidefinition::GatewayBindingType::SwaggerUi => {
+                GatewayBindingType::SwaggerUi
+            }
             golem_api_grpc::proto::golem::apidefinition::GatewayBindingType::AuthCallBack => {
-                GatewayBindingType::CorsPreflight
+                GatewayBindingType::AuthCallBack
             }
         }
     }
@@ -757,6 +760,12 @@ impl From<GatewayBindingType> for golem_api_grpc::proto::golem::apidefinition::G
             }
             GatewayBindingType::CorsPreflight => {
                 golem_api_grpc::proto::golem::apidefinition::GatewayBindingType::CorsPreflight
+            }
+            GatewayBindingType::SwaggerUi => {
+                golem_api_grpc::proto::golem::apidefinition::GatewayBindingType::SwaggerUi
+            }
+            GatewayBindingType::AuthCallBack => {
+                golem_api_grpc::proto::golem::apidefinition::GatewayBindingType::AuthCallBack
             }
         }
     }

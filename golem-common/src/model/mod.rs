@@ -86,7 +86,10 @@ newtype_uuid!(
     golem_api_grpc::proto::golem::component::ComponentId
 );
 
-newtype_uuid!(ProjectId, golem_api_grpc::proto::golem::common::ProjectId);
+newtype_uuid!(
+    ProjectId,
+    golem_api_grpc::proto::golem::common::ProjectId
+);
 
 newtype_uuid!(
     PluginInstallationId,
@@ -317,7 +320,10 @@ impl Display for OwnedWorkerId {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize, Encode, Decode)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Encode, Decode, Serialize, Deserialize)]
+#[cfg_attr(feature = "poem", derive(poem_openapi::Object))]
+#[cfg_attr(feature = "poem", oai(rename_all = "camelCase"))]
+#[serde(rename_all = "camelCase")]
 pub struct TargetWorkerId {
     pub component_id: ComponentId,
     pub worker_name: Option<String>,
@@ -336,7 +342,7 @@ impl TargetWorkerId {
         })
     }
 
-    /// Converts a `TargetWorkerId` to a `WorkerId`. If the worker name was not specified,
+    /// Converts a `TargetWorkerId` to a `WorkerId`. If the worker name is not specified,
     /// it generates a new unique one, and if the `force_in_shard` set is not empty, it guarantees
     /// that the generated worker ID will belong to one of the provided shards.
     ///
@@ -668,83 +674,6 @@ impl Display for ShardAssignment {
             "{{ number_of_shards: {}, shard_ids: {} }}",
             self.number_of_shards, shard_ids
         )
-    }
-}
-
-#[derive(Clone, Debug, Encode, Decode, Eq, Hash, PartialEq)]
-pub struct IdempotencyKey {
-    pub value: String,
-}
-
-impl IdempotencyKey {
-    const ROOT_NS: Uuid = uuid!("9C19B15A-C83D-46F7-9BC3-EAD7923733F4");
-
-    pub fn new(value: String) -> Self {
-        Self { value }
-    }
-
-    pub fn from_uuid(value: Uuid) -> Self {
-        Self {
-            value: value.to_string(),
-        }
-    }
-
-    pub fn fresh() -> Self {
-        Self::from_uuid(Uuid::new_v4())
-    }
-
-    /// Generates a deterministic new idempotency key using a base idempotency key and an oplog index.
-    ///
-    /// The base idempotency key determines the "namespace" of the generated key UUIDv5. If
-    /// the base idempotency key is already an UUID, it is directly used as the namespace of the v5 algorithm,
-    /// while the name part is derived from the given oplog index.
-    ///
-    /// If the base idempotency key is not an UUID (as it can be an arbitrary user-provided string), then first
-    /// we generate a UUIDv5 in the ROOT_NS namespace and use that as unique namespace for generating
-    /// the new idempotency key.
-    pub fn derived(base: &IdempotencyKey, oplog_index: OplogIndex) -> Self {
-        let namespace = if let Ok(base_uuid) = Uuid::parse_str(&base.value) {
-            base_uuid
-        } else {
-            Uuid::new_v5(&Self::ROOT_NS, base.value.as_bytes())
-        };
-        let name = format!("oplog-index-{}", oplog_index);
-        Self::from_uuid(Uuid::new_v5(&namespace, name.as_bytes()))
-    }
-}
-
-impl Serialize for IdempotencyKey {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        self.value.serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for IdempotencyKey {
-    fn deserialize<D>(deserializer: D) -> Result<IdempotencyKey, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let value = String::deserialize(deserializer)?;
-        Ok(IdempotencyKey { value })
-    }
-}
-
-impl IntoValue for IdempotencyKey {
-    fn into_value(self) -> golem_wasm_rpc::Value {
-        golem_wasm_rpc::Value::String(self.value)
-    }
-
-    fn get_type() -> AnalysedType {
-        analysed_type::str()
-    }
-}
-
-impl Display for IdempotencyKey {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.value)
     }
 }
 
@@ -2187,6 +2116,7 @@ pub enum GatewayBindingType {
     Default,
     FileServer,
     CorsPreflight,
+    SwaggerUi,
 }
 
 // To keep backward compatibility as we documented wit-worker to be default
@@ -2212,6 +2142,7 @@ impl<'de> Deserialize<'de> for GatewayBindingType {
                     "default" | "wit-worker" => Ok(GatewayBindingType::Default),
                     "file-server" => Ok(GatewayBindingType::FileServer),
                     "cors-preflight" => Ok(GatewayBindingType::CorsPreflight),
+                    "swagger-ui" => Ok(GatewayBindingType::SwaggerUi),
                     _ => Err(de::Error::invalid_value(Unexpected::Str(value), &self)),
                 }
             }
@@ -2228,357 +2159,10 @@ impl TryFrom<String> for GatewayBindingType {
         match value.as_str() {
             "default" => Ok(GatewayBindingType::Default),
             "file-server" => Ok(GatewayBindingType::FileServer),
+            "swagger-ui" => Ok(GatewayBindingType::SwaggerUi),
             _ => Err(format!("Invalid WorkerBindingType: {}", value)),
         }
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use test_r::test;
-
-    use std::collections::HashSet;
-    use std::str::FromStr;
-    use std::time::SystemTime;
-    use std::vec;
-
-    use crate::model::oplog::OplogIndex;
-
-    use crate::model::{
-        AccountId, ComponentFilePath, ComponentId, FilterComparator, IdempotencyKey, ShardId,
-        StringFilterComparator, TargetWorkerId, Timestamp, WorkerFilter, WorkerId, WorkerMetadata,
-        WorkerStatus, WorkerStatusRecord,
-    };
-    use bincode::{Decode, Encode};
-
-    use rand::{thread_rng, Rng};
-    use serde::{Deserialize, Serialize};
-
-    #[test]
-    fn timestamp_conversion() {
-        let ts: Timestamp = Timestamp::now_utc();
-
-        let prost_ts: prost_types::Timestamp = ts.into();
-
-        let ts2: Timestamp = prost_ts.into();
-
-        assert_eq!(ts2, ts);
-    }
-
-    #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Encode, Decode)]
-    struct ExampleWithAccountId {
-        account_id: AccountId,
-    }
-
-    #[test]
-    fn account_id_from_json_apigateway_version() {
-        let json = "{ \"account_id\": \"account-1\" }";
-        let example: ExampleWithAccountId = serde_json::from_str(json).unwrap();
-        assert_eq!(
-            example.account_id,
-            AccountId {
-                value: "account-1".to_string()
-            }
-        );
-    }
-
-    #[test]
-    fn account_id_json_serialization() {
-        // We want to use this variant for serialization because it is used on the public API gateway API
-        let example: ExampleWithAccountId = ExampleWithAccountId {
-            account_id: AccountId {
-                value: "account-1".to_string(),
-            },
-        };
-        let json = serde_json::to_string(&example).unwrap();
-        assert_eq!(json, "{\"account_id\":\"account-1\"}");
-    }
-
-    #[test]
-    fn worker_filter_parse() {
-        assert_eq!(
-            WorkerFilter::from_str(" name =  worker-1").unwrap(),
-            WorkerFilter::new_name(StringFilterComparator::Equal, "worker-1".to_string())
-        );
-
-        assert_eq!(
-            WorkerFilter::from_str("status == Running").unwrap(),
-            WorkerFilter::new_status(FilterComparator::Equal, WorkerStatus::Running)
-        );
-
-        assert_eq!(
-            WorkerFilter::from_str("version >= 10").unwrap(),
-            WorkerFilter::new_version(FilterComparator::GreaterEqual, 10)
-        );
-
-        assert_eq!(
-            WorkerFilter::from_str("env.tag1 == abc ").unwrap(),
-            WorkerFilter::new_env(
-                "tag1".to_string(),
-                StringFilterComparator::Equal,
-                "abc".to_string(),
-            )
-        );
-    }
-
-    #[test]
-    fn worker_filter_combination() {
-        assert_eq!(
-            WorkerFilter::new_name(StringFilterComparator::Equal, "worker-1".to_string()).not(),
-            WorkerFilter::new_not(WorkerFilter::new_name(
-                StringFilterComparator::Equal,
-                "worker-1".to_string(),
-            ))
-        );
-
-        assert_eq!(
-            WorkerFilter::new_name(StringFilterComparator::Equal, "worker-1".to_string()).and(
-                WorkerFilter::new_status(FilterComparator::Equal, WorkerStatus::Running)
-            ),
-            WorkerFilter::new_and(vec![
-                WorkerFilter::new_name(StringFilterComparator::Equal, "worker-1".to_string()),
-                WorkerFilter::new_status(FilterComparator::Equal, WorkerStatus::Running),
-            ])
-        );
-
-        assert_eq!(
-            WorkerFilter::new_name(StringFilterComparator::Equal, "worker-1".to_string())
-                .and(WorkerFilter::new_status(
-                    FilterComparator::Equal,
-                    WorkerStatus::Running,
-                ))
-                .and(WorkerFilter::new_version(FilterComparator::Equal, 1)),
-            WorkerFilter::new_and(vec![
-                WorkerFilter::new_name(StringFilterComparator::Equal, "worker-1".to_string()),
-                WorkerFilter::new_status(FilterComparator::Equal, WorkerStatus::Running),
-                WorkerFilter::new_version(FilterComparator::Equal, 1),
-            ])
-        );
-
-        assert_eq!(
-            WorkerFilter::new_name(StringFilterComparator::Equal, "worker-1".to_string()).or(
-                WorkerFilter::new_status(FilterComparator::Equal, WorkerStatus::Running)
-            ),
-            WorkerFilter::new_or(vec![
-                WorkerFilter::new_name(StringFilterComparator::Equal, "worker-1".to_string()),
-                WorkerFilter::new_status(FilterComparator::Equal, WorkerStatus::Running),
-            ])
-        );
-
-        assert_eq!(
-            WorkerFilter::new_name(StringFilterComparator::Equal, "worker-1".to_string())
-                .or(WorkerFilter::new_status(
-                    FilterComparator::NotEqual,
-                    WorkerStatus::Running,
-                ))
-                .or(WorkerFilter::new_version(FilterComparator::Equal, 1)),
-            WorkerFilter::new_or(vec![
-                WorkerFilter::new_name(StringFilterComparator::Equal, "worker-1".to_string()),
-                WorkerFilter::new_status(FilterComparator::NotEqual, WorkerStatus::Running),
-                WorkerFilter::new_version(FilterComparator::Equal, 1),
-            ])
-        );
-
-        assert_eq!(
-            WorkerFilter::new_name(StringFilterComparator::Equal, "worker-1".to_string())
-                .and(WorkerFilter::new_status(
-                    FilterComparator::NotEqual,
-                    WorkerStatus::Running,
-                ))
-                .or(WorkerFilter::new_version(FilterComparator::Equal, 1)),
-            WorkerFilter::new_or(vec![
-                WorkerFilter::new_and(vec![
-                    WorkerFilter::new_name(StringFilterComparator::Equal, "worker-1".to_string()),
-                    WorkerFilter::new_status(FilterComparator::NotEqual, WorkerStatus::Running),
-                ]),
-                WorkerFilter::new_version(FilterComparator::Equal, 1),
-            ])
-        );
-
-        assert_eq!(
-            WorkerFilter::new_name(StringFilterComparator::Equal, "worker-1".to_string())
-                .or(WorkerFilter::new_status(
-                    FilterComparator::NotEqual,
-                    WorkerStatus::Running,
-                ))
-                .and(WorkerFilter::new_version(FilterComparator::Equal, 1)),
-            WorkerFilter::new_and(vec![
-                WorkerFilter::new_or(vec![
-                    WorkerFilter::new_name(StringFilterComparator::Equal, "worker-1".to_string()),
-                    WorkerFilter::new_status(FilterComparator::NotEqual, WorkerStatus::Running),
-                ]),
-                WorkerFilter::new_version(FilterComparator::Equal, 1),
-            ])
-        );
-    }
-
-    #[test]
-    fn worker_filter_matches() {
-        let component_id = ComponentId::new_v4();
-        let worker_metadata = WorkerMetadata {
-            worker_id: WorkerId {
-                worker_name: "worker-1".to_string(),
-                component_id,
-            },
-            args: vec![],
-            env: vec![
-                ("env1".to_string(), "value1".to_string()),
-                ("env2".to_string(), "value2".to_string()),
-            ],
-            account_id: AccountId {
-                value: "account-1".to_string(),
-            },
-            created_at: Timestamp::now_utc(),
-            parent: None,
-            last_known_status: WorkerStatusRecord {
-                component_version: 1,
-                ..WorkerStatusRecord::default()
-            },
-        };
-
-        assert!(
-            WorkerFilter::new_name(StringFilterComparator::Equal, "worker-1".to_string())
-                .and(WorkerFilter::new_status(
-                    FilterComparator::Equal,
-                    WorkerStatus::Idle,
-                ))
-                .matches(&worker_metadata)
-        );
-
-        assert!(WorkerFilter::new_env(
-            "env1".to_string(),
-            StringFilterComparator::Equal,
-            "value1".to_string(),
-        )
-        .and(WorkerFilter::new_status(
-            FilterComparator::Equal,
-            WorkerStatus::Idle,
-        ))
-        .matches(&worker_metadata));
-
-        assert!(WorkerFilter::new_env(
-            "env1".to_string(),
-            StringFilterComparator::Equal,
-            "value2".to_string(),
-        )
-        .not()
-        .and(
-            WorkerFilter::new_status(FilterComparator::Equal, WorkerStatus::Running).or(
-                WorkerFilter::new_status(FilterComparator::Equal, WorkerStatus::Idle)
-            )
-        )
-        .matches(&worker_metadata));
-
-        assert!(
-            WorkerFilter::new_name(StringFilterComparator::Equal, "worker-1".to_string())
-                .and(WorkerFilter::new_version(FilterComparator::Equal, 1))
-                .matches(&worker_metadata)
-        );
-
-        assert!(
-            WorkerFilter::new_name(StringFilterComparator::Equal, "worker-2".to_string())
-                .or(WorkerFilter::new_version(FilterComparator::Equal, 1))
-                .matches(&worker_metadata)
-        );
-
-        assert!(WorkerFilter::new_version(FilterComparator::GreaterEqual, 1)
-            .and(WorkerFilter::new_version(FilterComparator::Less, 2))
-            .or(WorkerFilter::new_name(
-                StringFilterComparator::Equal,
-                "worker-2".to_string(),
-            ))
-            .matches(&worker_metadata));
-    }
-
-    #[test]
-    fn target_worker_id_force_shards() {
-        let mut rng = thread_rng();
-        const SHARD_COUNT: usize = 1000;
-        const EXAMPLE_COUNT: usize = 1000;
-        for _ in 0..EXAMPLE_COUNT {
-            let mut shard_ids = HashSet::new();
-            let count = rng.gen_range(0..100);
-            for _ in 0..count {
-                let shard_id = rng.gen_range(0..SHARD_COUNT);
-                shard_ids.insert(ShardId {
-                    value: shard_id as i64,
-                });
-            }
-
-            let component_id = ComponentId::new_v4();
-            let target_worker_id = TargetWorkerId {
-                component_id,
-                worker_name: None,
-            };
-
-            let start = SystemTime::now();
-            let worker_id = target_worker_id.into_worker_id(&shard_ids, SHARD_COUNT);
-            let end = SystemTime::now();
-            println!(
-                "Time with {count} valid shards: {:?}",
-                end.duration_since(start).unwrap()
-            );
-
-            if !shard_ids.is_empty() {
-                assert!(shard_ids.contains(&ShardId::from_worker_id(&worker_id, SHARD_COUNT)));
-            }
-        }
-    }
-
-    #[test]
-    fn derived_idempotency_key() {
-        let base1 = IdempotencyKey::fresh();
-        let base2 = IdempotencyKey::fresh();
-        let base3 = IdempotencyKey {
-            value: "base3".to_string(),
-        };
-
-        assert_ne!(base1, base2);
-
-        let idx1 = OplogIndex::from_u64(2);
-        let idx2 = OplogIndex::from_u64(11);
-
-        let derived11a = IdempotencyKey::derived(&base1, idx1);
-        let derived12a = IdempotencyKey::derived(&base1, idx2);
-        let derived21a = IdempotencyKey::derived(&base2, idx1);
-        let derived22a = IdempotencyKey::derived(&base2, idx2);
-
-        let derived11b = IdempotencyKey::derived(&base1, idx1);
-        let derived12b = IdempotencyKey::derived(&base1, idx2);
-        let derived21b = IdempotencyKey::derived(&base2, idx1);
-        let derived22b = IdempotencyKey::derived(&base2, idx2);
-
-        let derived31 = IdempotencyKey::derived(&base3, idx1);
-        let derived32 = IdempotencyKey::derived(&base3, idx2);
-
-        assert_eq!(derived11a, derived11b);
-        assert_eq!(derived12a, derived12b);
-        assert_eq!(derived21a, derived21b);
-        assert_eq!(derived22a, derived22b);
-
-        assert_ne!(derived11a, derived12a);
-        assert_ne!(derived11a, derived21a);
-        assert_ne!(derived11a, derived22a);
-        assert_ne!(derived12a, derived21a);
-        assert_ne!(derived12a, derived22a);
-        assert_ne!(derived21a, derived22a);
-
-        assert_ne!(derived11a, derived31);
-        assert_ne!(derived21a, derived31);
-        assert_ne!(derived12a, derived32);
-        assert_ne!(derived22a, derived32);
-        assert_ne!(derived31, derived32);
-    }
-
-    #[test]
-    fn initial_component_file_path_from_absolute() {
-        let path = ComponentFilePath::from_abs_str("/a/b/c").unwrap();
-        assert_eq!(path.to_string(), "/a/b/c");
-    }
-
-    #[test]
-    fn initial_component_file_path_from_relative() {
-        let path = ComponentFilePath::from_abs_str("a/b/c");
-        assert!(path.is_err());
-    }
-}
+```
