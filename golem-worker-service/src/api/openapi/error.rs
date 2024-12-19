@@ -1,6 +1,5 @@
 use thiserror::Error;
 use openapiv3::{OpenAPI, ReferenceOr};
-use golem_wasm_ast::analysis::AnalysedType;
 use tracing::warn;
 
 #[derive(Error, Debug)]

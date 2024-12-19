@@ -214,7 +214,7 @@ fn validate_parameter_schema(schema: &OpenAPISchema) -> Result<(), OpenAPIError>
     }
 }
 mod tests {
-    use super::*;
+    use super::{validate_parameter_name, validate_catch_all_name};
 
     #[test]
     fn test_parameter_name_validation() {

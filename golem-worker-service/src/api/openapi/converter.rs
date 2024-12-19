@@ -3,12 +3,12 @@ use crate::api::definition::types::{ApiDefinition, Route, HttpMethod, BindingTyp
 use crate::api::definition::patterns::{AllPathPatterns, PathPattern};
 use std::collections::HashMap;
 use heck::ToSnakeCase;
+use openapiv3::Components;
 
 pub struct OpenAPIConverter;
 
 impl OpenAPIConverter {
     pub fn convert_to_spec(api: &ApiDefinition) -> OpenAPISpec {
-        let converter = OpenAPIConverter;
         OpenAPISpec {
             openapi: "3.0.0".to_string(),
             info: Info {
@@ -16,7 +16,7 @@ impl OpenAPIConverter {
                 version: "1.0".to_string(),
                 description: None,
             },
-            paths: converter.convert_paths(&api.routes),
+            paths: Self::convert_paths(&api.routes),
             components: Some(Self::create_components(&api.routes)),
             security: None,
         }
@@ -43,8 +43,8 @@ impl OpenAPIConverter {
                         });
                         map
                     },
-                       ..operation
-                    }),
+                    ..operation
+                }),
                 parameters: None,
             };
 
@@ -54,7 +54,7 @@ impl OpenAPIConverter {
         paths
     }
 
-    fn generate_operation(&self, route: &Route) -> Operation {
+    fn generate_operation(route: &Route) -> Operation {
         match &route.binding {
             BindingType::Default { .. } => {
                 Operation {

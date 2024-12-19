@@ -1,8 +1,14 @@
 use crate::api::definition::types::{ApiDefinition, BindingType};
 use golem_wasm_ast::analysis::{
-    AnalysedType, TypeStr, TypeI32, TypeI64, TypeF32, TypeF64, TypeBool, 
-    TypeList, TypeOption, TypeRecord, TypeResult, NameTypePair, TypeVoid
+    AnalysedType, TypeStr, TypeInt32, TypeInt64, TypeF32, TypeF64, TypeBool, 
+    TypeList, TypeOption, TypeRecord, TypeResult, NameTypePair, TypeEmpty
 };
+
+#[derive(Debug)]
+enum TypeConstraint {
+    Input,
+    Output,
+}
 
 pub fn validate_api_definition(api: &ApiDefinition) -> Result<(), String> {
     for route in &api.routes {
@@ -18,12 +24,12 @@ pub fn validate_api_definition(api: &ApiDefinition) -> Result<(), String> {
 fn parse_type(type_str: &str) -> Result<AnalysedType, String> {
     match type_str {
         "string" => Ok(AnalysedType::Str(TypeStr)),
-        "i32" => Ok(AnalysedType::I32(TypeI32)), // Changed from Int32 to I32
-        "i64" => Ok(AnalysedType::I64(TypeI64)), // Changed from Int64 to I64
+        "i32" => Ok(AnalysedType::Int32(TypeInt32)), // Changed from I32 to Int32
+        "i64" => Ok(AnalysedType::Int64(TypeInt64)), // Changed from I64 to Int64
         "f32" => Ok(AnalysedType::F32(TypeF32)),
         "f64" => Ok(AnalysedType::F64(TypeF64)),
         "bool" => Ok(AnalysedType::Bool(TypeBool)),
-        "void" => Ok(AnalysedType::Unit(TypeVoid)), // Changed from Void to Unit
+        "void" => Ok(AnalysedType::Empty(TypeEmpty)), // Changed from Unit to Empty
         t if t.starts_with("list<") => {
             let inner_type = t.trim_start_matches("list<").trim_end_matches('>');
             let inner = parse_type(inner_type)?;
@@ -96,12 +102,12 @@ fn validate_type_constraints(typ: &AnalysedType, constraint: TypeConstraint) -> 
     match (typ, constraint) {
         // Validate primitive types
         (AnalysedType::Str(_), _) |
-        (AnalysedType::I32(_), _) |     // Changed from Int32 to I32
-        (AnalysedType::I64(_), _) |     // Changed from Int64 to I64
+        (AnalysedType::Int32(_), _) |     // Changed from I32 to Int32
+        (AnalysedType::Int64(_), _) |     // Changed from I64 to Int64
         (AnalysedType::F32(_), _) |
         (AnalysedType::F64(_), _) |
         (AnalysedType::Bool(_), _) |
-        (AnalysedType::Unit(_), _) => Ok(()),  // Changed from Void to Unit
+        (AnalysedType::Empty(_), _) => Ok(()),  // Changed from Unit to Empty
 
         // Validate lists
         (AnalysedType::List(l), c) => validate_type_constraints(&l.inner, c),
@@ -135,12 +141,12 @@ fn are_types_compatible(input: &AnalysedType, output: &AnalysedType) -> bool {
     match (input, output) {
         // Check primitive type compatibility
         (AnalysedType::Str(_), AnalysedType::Str(_)) |
-        (AnalysedType::I32(_), AnalysedType::I32(_)) |     // Changed from Int32 to I32
-        (AnalysedType::I64(_), AnalysedType::I64(_)) |     // Changed from Int64 to I64
+        (AnalysedType::Int32(_), AnalysedType::Int32(_)) |     // Changed from I32 to Int32
+        (AnalysedType::Int64(_), AnalysedType::Int64(_)) |     // Changed from I64 to Int64
         (AnalysedType::F32(_), AnalysedType::F32(_)) |
         (AnalysedType::F64(_), AnalysedType::F64(_)) |
         (AnalysedType::Bool(_), AnalysedType::Bool(_)) |
-        (AnalysedType::Unit(_), AnalysedType::Unit(_)) => true,  // Changed from Void to Unit
+        (AnalysedType::Empty(_), AnalysedType::Empty(_)) => true,  // Changed from Unit to Empty
 
         // Check list compatibility
         (AnalysedType::List(l1), AnalysedType::List(l2)) => 

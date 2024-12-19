@@ -15,25 +15,26 @@ use tracing::{error, info};
 use crate::service::api::Cache;
 use openapiv3::OpenAPI;
 
-#[derive(Clone)]
-pub struct OpenAPIExportConfig {
-    pub default_namespace: String,
-}
+#[derive(Debug)]
+struct ApiError(StatusCode);
 
-impl Default for OpenAPIExportConfig {
-    fn default() -> Self {
-        Self {
-            default_namespace: "default".to_string(),
-        }
+impl From<ApiDefinitionError> for ApiError {
+    fn from(err: ApiDefinitionError) -> Self {
+        error!("API definition error: {}", err);
+        ApiError(StatusCode::NOT_FOUND)
     }
 }
 
-impl From<OpenAPIError> for StatusCode {
-    fn from(err: OpenAPIError) -> Self {
-        match err {
-            OpenAPIError::InvalidDefinition(_) => StatusCode::BAD_REQUEST,
-            OpenAPIError::ValidationFailed(_) => StatusCode::INTERNAL_SERVER_ERROR,
-        }
+impl From<CacheError> for ApiError {
+    fn from(err: CacheError) -> Self {
+        error!("Cache error: {}", err);
+        ApiError(StatusCode::INTERNAL_SERVER_ERROR)
+    }
+}
+
+impl From<ApiError> for StatusCode {
+    fn from(err: ApiError) -> Self {
+        err.0
     }
 }
 
@@ -51,6 +52,30 @@ impl From<ApiDefinitionError> for StatusCode {
     }
 }
 
+impl From<OpenAPIError> for StatusCode {
+    fn from(err: OpenAPIError) -> Self {
+        match err {
+            OpenAPIError::InvalidDefinition(_) => StatusCode::BAD_REQUEST,
+            OpenAPIError::ValidationFailed(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            OpenAPIError::CacheError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            OpenAPIError::SchemaMismatch { .. } => StatusCode::BAD_REQUEST,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct OpenAPIExportConfig {
+    pub default_namespace: String,
+}
+
+impl Default for OpenAPIExportConfig {
+    fn default() -> Self {
+        Self {
+            default_namespace: "default".to_string(),
+        }
+    }
+}
+
 fn convert_method(method: &MethodPattern) -> HttpMethod {
     match method {
         MethodPattern::Get => HttpMethod::Get,
@@ -60,7 +85,6 @@ fn convert_method(method: &MethodPattern) -> HttpMethod {
         MethodPattern::Patch => HttpMethod::Patch,
         MethodPattern::Head => HttpMethod::Head,
         MethodPattern::Options => HttpMethod::Options,
-        // Provide a default case to handle unexpected variants
         _ => {
             error!("Unsupported HTTP method encountered: {:?}", method);
             HttpMethod::Get
@@ -71,11 +95,6 @@ fn convert_method(method: &MethodPattern) -> HttpMethod {
 fn convert_binding(binding: &GatewayBindingCompiled) -> BindingType {
     match binding {
         GatewayBindingCompiled::Worker(_) => BindingType::Worker,
-        // Provide a default case to handle unexpected variants
-        _ => {
-            error!("Unsupported binding type encountered: {:?}", binding);
-            BindingType::Worker // Defaulting to Worker; adjust as needed
-        }
     }
 }
 
