@@ -1,25 +1,33 @@
 use serde::{Deserialize, Serialize};
+use golem_worker_service_base::gateway_api_definition::http::{CompiledHttpApiDefinition, MethodPattern, CompiledRoute};
+use golem_worker_service_base::gateway_binding::gateway_binding_compiled::GatewayBindingCompiled;
+use std::str::FromStr;
 
 /// Base binding types for the API Gateway
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum BindingType {
     Http,
-    Worker,
+    Worker {
+        worker_type: String,
+        response_type: String,
+        component_id: String,
+    },
     Proxy,
-    #[serde(rename = "Default")]
     Default {
         input_type: String,
         output_type: String,
         function_name: String,
     },
-    #[serde(rename = "FileServer")]
     FileServer {
         root_dir: String,
     },
-    #[serde(rename = "SwaggerUI")]
     SwaggerUI {
         spec_path: String,
+    },
+    Static {
+        content_type: String,
+        content: Vec<u8>,
     },
 }
 
@@ -40,6 +48,31 @@ impl std::fmt::Display for BindingType {
     }
 }
 
+impl From<&GatewayBindingCompiled> for BindingType {
+    fn from(binding: &GatewayBindingCompiled) -> Self {
+        match binding {
+            GatewayBindingCompiled::Worker(worker) => BindingType::Worker {
+                worker_type: worker.worker_type.to_string(),
+                response_type: worker.response_mapping.to_string(),
+                component_id: worker.id.to_string(),
+            },
+            GatewayBindingCompiled::FileServer(fs_binding) => {
+                BindingType::FileServer {
+                    root_dir: fs_binding.to_string(),
+                }
+            },
+            GatewayBindingCompiled::Static(static_binding) => {
+                let binding = &**static_binding;
+                BindingType::Static {
+                    content_type: binding.get_content_type().to_string(),
+                    content: binding.get_content().to_vec(),
+                }
+            },
+        }
+    }
+}
+
+/// Represents an API definition with routes and metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApiDefinition {
     pub id: String,
@@ -49,12 +82,64 @@ pub struct ApiDefinition {
     pub routes: Vec<Route>,
 }
 
+impl ApiDefinition {
+    /// Validates the API definition
+    pub fn validate(&self) -> Result<(), String> {
+        if self.id.is_empty() {
+            return Err("API ID cannot be empty".to_string());
+        }
+        if self.version.is_empty() {
+            return Err("Version cannot be empty".to_string());
+        }
+        if self.routes.is_empty() {
+            return Err("API must have at least one route".to_string());
+        }
+        Ok(())
+    }
+}
+
+impl<T> From<&CompiledHttpApiDefinition<T>> for ApiDefinition {
+    fn from(compiled: &CompiledHttpApiDefinition<T>) -> Self {
+        ApiDefinition {
+            id: compiled.id.0.clone(),
+            name: compiled.id.0.clone(),
+            version: compiled.version.0.clone(),
+            description: format!("API Definition {}", compiled.id.0),
+            routes: compiled.routes.iter().map(|route| {
+                Route {
+                    path: route.path.to_string(),
+                    method: match route.method {
+                        MethodPattern::Get => HttpMethod::Get,
+                        MethodPattern::Post => HttpMethod::Post,
+                        MethodPattern::Put => HttpMethod::Put,
+                        MethodPattern::Delete => HttpMethod::Delete,
+                        MethodPattern::Patch => HttpMethod::Patch,
+                        MethodPattern::Head => HttpMethod::Head,
+                        MethodPattern::Options => HttpMethod::Options,
+                    },
+                    description: route.get_description()
+                        .unwrap_or_else(|| "No description available".to_string()),
+                    template_name: route.get_template_name()
+                        .unwrap_or_default(),
+                    binding: BindingType::from(&route.binding),
+                }
+            }).collect(),
+        }
+    }
+}
+
+/// Represents a single route in the API definition
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Route {
+    /// The HTTP path pattern for this route
     pub path: String,
+    /// The HTTP method for this route
     pub method: HttpMethod,
+    /// Human-readable description of the route
     pub description: String,
+    /// Optional template name for the route
     pub template_name: String,
+    /// The binding configuration for this route
     pub binding: BindingType,
 }
 
@@ -80,5 +165,45 @@ impl std::fmt::Display for HttpMethod {
             HttpMethod::Head => write!(f, "HEAD"),
             HttpMethod::Options => write!(f, "OPTIONS"),
         }
+    }
+}
+
+impl FromStr for HttpMethod {
+    type Err = String;
+    
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_uppercase().as_str() {
+            "GET" => Ok(HttpMethod::Get),
+            "POST" => Ok(HttpMethod::Post),
+            "PUT" => Ok(HttpMethod::Put),
+            "DELETE" => Ok(HttpMethod::Delete),
+            "PATCH" => Ok(HttpMethod::Patch),
+            "HEAD" => Ok(HttpMethod::Head),
+            "OPTIONS" => Ok(HttpMethod::Options),
+            _ => Err(format!("Invalid HTTP method: {}", s)),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_api_definition_validation() {
+        let invalid_api = ApiDefinition {
+            id: "".into(),
+            name: "test".into(),
+            version: "1.0".into(),
+            description: "test".into(),
+            routes: vec![],
+        };
+        assert!(invalid_api.validate().is_err());
+    }
+
+    #[test]
+    fn test_http_method_from_str() {
+        assert_eq!(HttpMethod::from_str("GET").unwrap(), HttpMethod::Get);
+        assert!(HttpMethod::from_str("INVALID").is_err());
     }
 }

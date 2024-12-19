@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use golem_wasm_ast::analysis::analysed_type::AnalysedType;
+
+// Remove AnalysedType import since it's private
+// use golem_wasm_ast::analysis::analysed_type::AnalysedType;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpenAPISpec {
@@ -193,8 +195,8 @@ pub struct SecurityRequirement(HashMap<String, Vec<String>>);
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum BindingType {
     Default {
-        input_type: AnalysedType,
-        output_type: AnalysedType,
+        input_type: String,  // Changed from AnalysedType to String
+        output_type: String, // Changed from AnalysedType to String
         options: Option<BindingOptions>,
     },
     FileServer {
@@ -209,6 +211,32 @@ pub enum BindingType {
         content_type: String,
         content: Vec<u8>,
     },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuthConfig {
+    pub enabled: bool,
+    pub provider: String,
+    pub scopes: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CacheConfig {
+    pub max_age: Option<u32>,
+    pub must_revalidate: Option<bool>,
+    pub no_cache: Option<bool>,
+    pub no_store: Option<bool>,
+    pub private: Option<bool>,
+    pub public: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CorsConfig {
+    pub allowed_origins: Option<Vec<String>>,
+    pub allowed_methods: Option<Vec<String>>,
+    pub allowed_headers: Option<Vec<String>>,
+    pub allow_credentials: Option<bool>,
+    pub max_age: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -12,12 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub use http_api_definition::*;
-pub use http_api_definition_request::*;
-pub use http_oas_api_definition::*;
+mod api_definition;
+mod method;
+mod path;
+mod route;
+mod types;
 
-mod http_api_definition;
-mod http_api_definition_request;
-mod http_oas_api_definition;
-pub(crate) mod path_pattern_parser;
-pub(crate) mod place_holder_parser;
+pub use api_definition::*;
+pub use method::MethodPattern;
+pub use path::AllPathPatterns;
+pub use route::{CompiledRoute, Route, RouteRequest};
+pub use types::*;
+
+// Re-export everything from types
+pub use types::{
+    ComponentMetadataDictionary, HttpApiDefinition, HttpApiDefinitionRequest, PathPattern,
+    QueryInfo, RouteCompilationErrors, VarInfo, WorkerIdGenerateError,
+};

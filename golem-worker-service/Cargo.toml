@@ -41,7 +41,7 @@ humantime-serde = { workspace = true }
 hyper = { workspace = true }
 lazy_static = { workspace = true }
 nom = { workspace = true }
-openapiv3 = { workspace = true }
+openapiv3 = { version = "2.0.0", workspace = true }
 opentelemetry = { workspace = true }
 opentelemetry-prometheus = { workspace = true }
 opentelemetry_sdk = { workspace = true }
@@ -70,6 +70,7 @@ thiserror = { workspace = true }
 heck = { workspace = true }
 validator = { workspace = true }
 redis = { version = "0.23", features = ["tokio-comp", "aio"] }
+indexmap = { version = "2.7.0", features = ["serde"], workspace = true }
 
 [dev-dependencies]
 test-r = { workspace = true }

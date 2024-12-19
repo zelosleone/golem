@@ -15,7 +15,7 @@
 use std::future::Future;
 use std::sync::Arc;
 
-use crate::gateway_api_definition::http::CompiledHttpApiDefinition;
+use crate::gateway_execution::http::CompiledHttpApiDefinition;
 use crate::gateway_execution::api_definition_lookup::ApiDefinitionsLookup;
 use crate::gateway_execution::auth_call_back_binding_handler::DefaultAuthCallBack;
 use crate::gateway_execution::file_server_binding_handler::FileServerBindingHandler;

@@ -2,8 +2,9 @@ use async_trait::async_trait;
 use std::error::Error;
 use std::fmt;
 use serde::{Serialize, de::DeserializeOwned};
-use redis::{Client, RedisError, AsyncCommands};
+use redis::{Client, RedisError, AsyncCommands, aio::Connection};
 use std::sync::Arc;
+use golem_common::config::RedisConfig;
 
 #[async_trait]
 pub trait Cache: Send + Sync {
@@ -39,19 +40,19 @@ impl From<RedisError> for CacheError {
 
 
 pub struct RedisCache {
-    redis_client: Arc<Client>,
+    redis_pool: Arc<redis::Client>,
 }
 
 impl RedisCache {
-    pub async fn new(redis_url: String) -> Result<Self, CacheError> {
-        let client = Client::open(redis_url)?;
+    pub async fn new(redis_url: RedisConfig) -> Result<Self, CacheError> {
+        let client = Client::open(redis_url.url())?;
         Ok(RedisCache {
-            redis_client: Arc::new(client),
+            redis_pool: Arc::new(client),
         })
     }
     
-    async fn get_connection(&self) -> Result<redis::aio::Connection, RedisError> {
-        self.redis_client.get_async_connection().await
+    async fn get_connection(&self) -> Result<Connection, RedisError> {
+        self.redis_pool.get_async_connection().await
     }
 }
 

@@ -8,9 +8,6 @@ pub mod openapi;
 pub mod definition;
 pub mod validation;
 
-
-
-use crate::api::worker::WorkerApi;
 use crate::service::Services;
 use golem_worker_service_base::api::CustomHttpRequestApi;
 use golem_worker_service_base::api::HealthcheckApi;
@@ -18,15 +15,18 @@ use poem::endpoint::PrometheusExporter;
 use poem::{get, EndpointExt};
 use poem_openapi::OpenApiService;
 use prometheus::Registry;
-pub use types::*;
 
-pub use definition::*;
-pub use openapi::OpenAPIConverter;
-pub use openapi::validate_openapi;
-pub use openapi::OpenAPIError;
+// Export specific types
+pub use types::{
+    OpenAPISpec, Info, PathItem, Operation, BindingOptions,
+    FileServerOptions, SwaggerUIOptions
+};
+pub use definition::types::{ApiDefinition, Route, HttpMethod, BindingType};
+pub use openapi::{OpenAPIConverter,  OpenAPIError, validate_openapi};
 
+// Define ApiServices type here
 pub type ApiServices = (
-    WorkerApi,
+    worker::WorkerApi,
     api_definition::RegisterApiDefinitionApi,
     api_deployment::ApiDeploymentApi,
     security_scheme::SecuritySchemeApi,
