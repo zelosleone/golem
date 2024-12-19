@@ -4,8 +4,8 @@ use crate::service::api::CacheError;
 use golem_worker_service_base::gateway_api_definition::{ApiDefinitionId, ApiVersion};
 use golem_worker_service_base::gateway_api_definition::http::MethodPattern;
 use golem_worker_service_base::gateway_binding::gateway_binding_compiled::GatewayBindingCompiled;
-use golem_worker_service_base::service::gateway::api_definition::ApiDefinitionError;
-use golem_worker_service_base::service::auth::EmptyAuthCtx;
+use golem_worker_service_base::gateway_api_definition::ApiDefinitionError;
+use golem_service_base::auth::EmptyAuthCtx;
 use axum::{
     extract::{Path, State},
     Json,
