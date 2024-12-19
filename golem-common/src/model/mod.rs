@@ -671,103 +671,15 @@ impl From<StringFilterComparator> for GrpcStringFilterComparator {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "poem", derive(poem_openapi::Object))]
-#[cfg_attr(feature = "poem", oai(rename_all = "camelCase"))]
-#[serde(rename_all = "camelCase")]
-pub struct Empty {}
-
-/// Key that can be used to identify a component file.
-/// All files with the same content will have the same key.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[cfg_attr(feature = "poem", derive(poem_openapi::NewType))]
-pub struct InitialComponentFileKey(pub String);
-
-impl Display for InitialComponentFileKey {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-/// Path inside a component filesystem. Must be
-/// - absolute (start with '/')
-/// - not contain ".." components
-/// - not contain "." components
-/// - use '/' as a separator
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct ComponentFilePath(Utf8UnixPathBuf);
-
-impl ComponentFilePath {
-    pub fn from_abs_str(s: &str) -> Result<Self, String> {
-        let buf: Utf8UnixPathBuf = s.into();
-        if !buf.is_absolute() {
-            return Err("Path must be absolute".to_string());
-        }
-
-        Ok(ComponentFilePath(buf.normalize()))
-    }
-
-    pub fn from_rel_str(s: &str) -> Result<Self, String> {
-        Self::from_abs_str(&format!("/{}", s))
-    }
-
-    pub fn from_either_str(s: &str) -> Result<Self, String> {
-        if s.starts_with('/') {
-            Self::from_abs_str(s)
-        } else {
-            Self::from_rel_str(s)
-        }
-    }
-
-    pub fn as_path(&self) -> &Utf8UnixPathBuf {
-        &self.0
-    }
-
-    pub fn to_rel_string(&self) -> String {
-        self.0.strip_prefix("/").unwrap().to_string()
-    }
-
-    pub fn extend(&mut self, path: &str) -> Result<(), String> {
-        self.0.push_checked(path).map_err(|e| e.to_string())
-    }
-}
-
-impl Display for ComponentFilePath {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-impl Serialize for ComponentFilePath {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        String::serialize(&self.to_string(), serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for ComponentFilePath {
-    fn deserialize<D>(deserializer: D) -> Result<ComponentFilePath, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let str = String::deserialize(deserializer)?;
-        Self::from_abs_str(&str).map_err(serde::de::Error::custom)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[cfg_attr(feature = "poem", derive(poem_openapi::Enum))]
 #[serde(rename_all = "kebab-case")]
-#[cfg_attr(feature = "poem", oai(rename_all = "kebab-case"))]
 pub enum GatewayBindingType {
     #[default]
-    Default,
-    FileServer,
-    CorsPreflight,
-    AuthCallback,
-    SwaggerUi,
+    Http,
+    Https,
+    Tcp,
+    Tls,
 }
 
 impl<'de> Deserialize<'de> for GatewayBindingType {
@@ -785,11 +697,10 @@ impl FromStr for GatewayBindingType {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "default" | "wit-worker" => Ok(GatewayBindingType::Default),
-            "file-server" => Ok(GatewayBindingType::FileServer),
-            "cors-preflight" => Ok(GatewayBindingType::CorsPreflight),
-            "auth-callback" => Ok(GatewayBindingType::AuthCallback),
-            "swagger-ui" => Ok(GatewayBindingType::SwaggerUi),
+            "http" => Ok(GatewayBindingType::Http),
+            "https" => Ok(GatewayBindingType::Https),
+            "tcp" => Ok(GatewayBindingType::Tcp),
+            "tls" => Ok(GatewayBindingType::Tls),
             _ => Err(format!("Invalid binding type: {}", s)),
         }
     }
@@ -798,11 +709,10 @@ impl FromStr for GatewayBindingType {
 impl fmt::Display for GatewayBindingType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            GatewayBindingType::Default => write!(f, "default"),
-            GatewayBindingType::FileServer => write!(f, "file-server"),
-            GatewayBindingType::CorsPreflight => write!(f, "cors-preflight"),
-            GatewayBindingType::AuthCallback => write!(f, "auth-callback"),
-            GatewayBindingType::SwaggerUi => write!(f, "swagger-ui"),
+            GatewayBindingType::Http => write!(f, "http"),
+            GatewayBindingType::Https => write!(f, "https"),
+            GatewayBindingType::Tcp => write!(f, "tcp"),
+            GatewayBindingType::Tls => write!(f, "tls"),
         }
     }
 }
