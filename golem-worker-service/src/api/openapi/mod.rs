@@ -1,9 +1,7 @@
-mod types;
-mod converter;
-mod validation;
-mod error;
+pub mod types;
+pub mod converter;
+pub mod validation;
 
-pub use types::*;
+pub use types::OpenAPISpec;
 pub use converter::OpenAPIConverter;
-pub use validation::validate_openapi;
-pub use error::OpenAPIError;
+pub use validation::validate_openapi_spec;

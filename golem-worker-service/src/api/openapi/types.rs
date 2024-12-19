@@ -1,149 +1,103 @@
-use std::collections::HashMap;
-use serde::{Serialize, Deserialize};
+use indexmap::IndexMap;
+use openapiv3::{
+    OpenAPI, SecurityScheme, SecurityRequirement,
+    Info, Server, Components, Paths,
+    OAuthFlows, OAuthFlow,
+};
+use golem_worker_service_base::gateway_security;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OpenAPISpec {
-    pub openapi: String,
-    pub info: Info,
-    pub paths: HashMap<String, PathItem>,
-    pub components: Option<Components>,
-    pub security: Option<Vec<HashMap<String, Vec<String>>>>,
-}
+pub type OpenAPISpec = OpenAPI;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Info {
-    pub title: String,
-    pub version: String,
-    pub description: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PathItem {
-    pub get: Option<Operation>,
-    pub post: Option<Operation>,
-    pub put: Option<Operation>,
-    pub delete: Option<Operation>,
-    pub options: Option<Operation>,
-    pub parameters: Option<Vec<Parameter>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Operation {
-    pub summary: Option<String>,
-    pub description: Option<String>,
-    pub operation_id: Option<String>,
-    pub parameters: Option<Vec<Parameter>>,
-    pub request_body: Option<RequestBody>,
-    pub responses: HashMap<String, Response>,
-    pub security: Option<Vec<HashMap<String, Vec<String>>>>,
-    pub tags: Option<Vec<String>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Parameter {
-    pub name: String,
-    pub r#in: ParameterLocation,
-    pub description: Option<String>,
-    pub required: Option<bool>,
-    pub schema: Schema,
-    pub style: Option<String>,
-     pub explode: Option<bool>,
-}
-
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum ParameterLocation {
-    Path,
-    Query,
-    Header,
-    Cookie,
-}
-
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RequestBody {
-    pub description: Option<String>,
-    pub content: HashMap<String, MediaType>,
-    pub required: Option<bool>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MediaType {
-    pub schema: Schema,
-    pub example: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Response {
-    pub description: String,
-    pub content: Option<HashMap<String, MediaType>>,
-    pub headers: Option<HashMap<String, String>>,
-}
-
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Components {
-    pub schemas: Option<HashMap<String, Schema>>,
-    pub responses: Option<HashMap<String, Response>>,
-    pub parameters: Option<HashMap<String, Parameter>>,
-    pub security_schemes: Option<HashMap<String, SecurityScheme>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum Schema {
-    String {
-        format: Option<String>,
-         enum_values: Option<Vec<String>>
-    },
-    Integer {
-        format: Option<String>,
-    },
-    Number {
-        format: Option<String>,
-    },
-    Boolean,
-     Array {
-        items: Box<Schema>
-    },
-    Object {
-        properties: HashMap<String, Schema>,
-        required: Option<Vec<String>>,
-         additional_properties: Option<Box<Schema>>,
-    },
-    Ref {
-        reference: String,
+pub fn create_default_security_scheme() -> SecurityScheme {
+    SecurityScheme::OAuth2 {
+        flows: OAuthFlows {
+            implicit: None,
+            password: None,
+            client_credentials: None,
+            authorization_code: Some(OAuthFlow {
+                authorization_url: "https://api.golem.cloud/oauth2/authorize".to_string(),
+                token_url: "https://api.golem.cloud/oauth2/token".to_string(),
+                refresh_url: None,
+                scopes: {
+                    let mut scopes = IndexMap::new();
+                    scopes.insert("read".to_string(), "Read access".to_string());
+                    scopes.insert("write".to_string(), "Write access".to_string());
+                    scopes
+                },
+                extensions: IndexMap::new(),
+            }),
+            extensions: IndexMap::new(),
+        },
+        description: Some("OAuth2 authentication".to_string()),
+        extensions: IndexMap::new(),
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum SecurityScheme {
-    Http {
-        scheme: String,
-        bearer_format: Option<String>,
-        description: Option<String>
-    },
-     ApiKey {
-        r#in: ParameterLocation,
-        name: String,
-        description: Option<String>,
-    },
-   OAuth2 {
-    flows: OAuthFlows
-   }
+pub fn create_default_openapi_spec() -> OpenAPISpec {
+    let mut components = Components::default();
+    
+    // Add OAuth2 security scheme
+    let mut security_schemes = IndexMap::new();
+    security_schemes.insert(
+        "oauth2".to_string(),
+        openapiv3::ReferenceOr::Item(create_default_security_scheme()),
+    );
+    components.security_schemes = security_schemes;
+    
+    OpenAPI {
+        openapi: "3.0.3".to_string(),
+        info: Info {
+            title: "Golem Worker API".to_string(),
+            description: Some("API generated from Golem Worker definition".to_string()),
+            version: "1.0.0".to_string(),
+            terms_of_service: None,
+            contact: None,
+            license: None,
+            extensions: IndexMap::new(),
+        },
+        servers: vec![Server {
+            url: "/api".to_string(),
+            description: Some("API Server".to_string()),
+            variables: Some(IndexMap::new()),
+            extensions: IndexMap::new(),
+        }],
+        paths: Paths {
+            paths: IndexMap::new(),
+            extensions: IndexMap::new(),
+        },
+        components: Some(components),
+        security: Some(vec![SecurityRequirement::default()]),
+        tags: Vec::new(),
+        external_docs: None,
+        extensions: IndexMap::new(),
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OAuthFlows {
-    pub implicit: Option<OAuthFlow>,
-    pub password: Option<OAuthFlow>,
-    pub client_credentials: Option<OAuthFlow>,
-    pub authorization_code: Option<OAuthFlow>
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OAuthFlow {
-    pub authorization_url: String,
-    pub token_url: Option<String>,
-    pub refresh_url: Option<String>,
-    pub scopes: HashMap<String, String>
+pub fn convert_security_scheme(scheme: &gateway_security::SecurityScheme) -> SecurityScheme {
+    match scheme {
+        gateway_security::SecurityScheme::OAuth2 { flows, .. } => SecurityScheme::OAuth2 {
+            flows: OAuthFlows {
+                implicit: None,
+                password: None,
+                client_credentials: None,
+                authorization_code: Some(OAuthFlow {
+                    authorization_url: flows.authorization_endpoint.clone(),
+                    token_url: flows.token_endpoint.clone(),
+                    refresh_url: None,
+                    scopes: {
+                        let mut scopes = IndexMap::new();
+                        for scope in &flows.scopes {
+                            scopes.insert(scope.clone(), "Access scope".to_string());
+                        }
+                        scopes
+                    },
+                    extensions: IndexMap::new(),
+                }),
+                extensions: IndexMap::new(),
+            },
+            description: Some("OAuth2 authentication".to_string()),
+            extensions: IndexMap::new(),
+        },
+        _ => create_default_security_scheme(),
+    }
 }
