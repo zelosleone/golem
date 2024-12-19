@@ -1,9 +1,11 @@
 use crate::api::definition::types::{ApiDefinition, Route, HttpMethod, BindingType};
 use crate::api::definition::patterns::{AllPathPatterns, PathPattern};
-use crate::api::openapi::types::{OpenAPISchemaType, Parameter};
+use crate::api::openapi::types::{OpenAPISchemaType, Parameter, ParameterLocation};
 use golem_wasm_ast::analysis::{
     AnalysedType,
-    TypeStr, TypeBool, TypeList, TypeRecord,
+    TypeStr, TypeBool, TypeList, TypeRecord, 
+    // Add these if needed by your codebase
+    TypeS32, TypeS64, TypeF32, TypeF64, TypeChr, TypeTuple, TypeFlags, TypeEnum
 };
 use openapiv3::{
     OpenAPI as OpenAPISpec, Info, Paths, Operation, PathItem,
@@ -16,7 +18,6 @@ use openapiv3::{
     StatusCode,
 };
 use indexmap::IndexMap;
-use crate::api::openapi::types::{Parameter, ParameterLocation};
 use std::collections::HashMap;
 use heck::ToSnakeCase;
 use tracing::warn;
@@ -122,7 +123,7 @@ impl OpenAPIConverter {
             summary: Some(route.description.clone()),
             description: None,
             external_docs: None,
-            operation_id: Some(format!("{}_{}", 
+            operation_id: Some(format!("{}_{}",
                 route.template_name.to_snake_case(),
                 route.method.to_string().to_lowercase()
             )),
@@ -139,7 +140,7 @@ impl OpenAPIConverter {
 
     fn convert_parameters(route: &Route) -> Vec<ReferenceOr<openapiv3::Parameter>> {
         let mut params = Vec::new();
-        
+
         if let Some(path_params) = Self::extract_path_parameters(&route.path) {
             for param in path_params {
                 let schema: Schema = param.schema.clone().into();
@@ -212,10 +213,7 @@ impl OpenAPIConverter {
                         },
                         style: Some("matrix".to_string()),
                         explode: Some(true),
-                        description: Some(format![
-                            "Multi-segment catch-all parameter for {}",
-                            info.key_name
-                        ])
+                        description: Some(format!("Multi-segment catch-all parameter for {}", info.key_name))
                     })
                 },
                 _ => None
@@ -226,7 +224,7 @@ impl OpenAPIConverter {
     }
 
     fn validate_path_parameter(name: &str) -> bool {
-        !name.is_empty() 
+        !name.is_empty()
             && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
             && !name.starts_with('_')
             && !name.ends_with('_')
@@ -323,13 +321,13 @@ impl OpenAPIConverter {
             examples: IndexMap::new(),
             extensions: IndexMap::new(),
         };
-        
+
         headers.insert(
             "Access-Control-Allow-Origin".to_string(),
             ReferenceOr::Item(header.clone())
         );
         headers.insert(
-            "Access-Control-Allow-Methods".to_string(), 
+            "Access-Control-Allow-Methods".to_string(),
             ReferenceOr::Item(header.clone())
         );
         headers.insert(
@@ -345,7 +343,7 @@ impl OpenAPIConverter {
             ReferenceOr::Item(header.clone())
         );
         headers
-        }
+    }
 
     fn create_components(_routes: &[Route]) -> Components {
         Components {
@@ -384,7 +382,6 @@ impl OpenAPIConverter {
             BindingType::SwaggerUI { .. } => ReferenceOr::Item(Schema {
                 schema_data: Default::default(),
                 schema_kind: openapiv3::SchemaKind::Type(openapiv3::Type::String(StringType {
-                    // Just set to None if you don't want 'Other("html")'
                     format: None,
                     pattern: None,
                     enumeration: vec![],
@@ -404,14 +401,12 @@ impl OpenAPIConverter {
         }
     }
 
-    // Add this helper method
     fn convert_string_to_analyzed_type(s: &str) -> Result<AnalysedType, String> {
         match s {
             "string" => Ok(AnalysedType::Str(TypeStr)),
             "bool" => Ok(AnalysedType::Bool(TypeBool)),
             "i32" | "s32" => Ok(AnalysedType::S32(TypeS32)),
             "i64" | "s64" => Ok(AnalysedType::S64(TypeS64)),
-            // Add more mappings as needed
             _ => Err(format!("Unsupported type: {}", s))
         }
     }
@@ -465,7 +460,6 @@ fn analysed_type_to_schema(typ: &AnalysedType) -> ReferenceOr<Schema> {
     ReferenceOr::Item(schema.into())
 }
 
-// Add this function to properly convert string types to analyzed types
 fn analysed_type_from_string(typ_str: &str) -> Result<AnalysedType, String> {
     // Basic implementation - expand based on your type system
     match typ_str {
@@ -476,7 +470,6 @@ fn analysed_type_from_string(typ_str: &str) -> Result<AnalysedType, String> {
     }
 }
 
-// Update schema creation functions to use OpenAPISchemaType
 fn boolean_schema() -> ReferenceOr<Schema> {
     ReferenceOr::Item(Schema {
         schema_data: Default::default(),
@@ -532,7 +525,7 @@ fn string_schema(_format: Option<&str>) -> ReferenceOr<Schema> {
 #[cfg(test)]
 mod tests {
    use super::*;
-   use golem_wasm_ast::analysis::{TypeStr, TypeRecord, NameTypePair};
+   use golem_wasm_ast::analysis::{TypeStr, TypeBool};
    use crate::api::definition::types::{Route, HttpMethod, BindingType, ApiDefinition};
 
    #[test]
@@ -562,5 +555,3 @@ mod tests {
        assert!(spec.paths.paths.contains_key("/test"));
    }
 }
-```
-</copilot-edited-file>

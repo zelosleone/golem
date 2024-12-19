@@ -3,7 +3,6 @@ mod error;
 mod validation;
 mod types;
 
-pub use converter::OpenAPIConverter;
 pub use error::{OpenAPIError, validate_openapi};
 pub use types::OpenAPISpec;
 
@@ -18,6 +17,9 @@ pub use openapiv3::{
 
 use openapiv3::OpenAPI;
 use crate::api::definition::types::ApiDefinition;
+
+pub use converter::OpenAPIConverter;
+pub struct OpenAPIConverter;
 
 impl OpenAPIConverter {
     pub fn convert(api: &ApiDefinition) -> OpenAPI {

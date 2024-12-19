@@ -1,14 +1,20 @@
 use super::types::{OpenAPISpec, PathItem, ParameterLocation};
 use std::collections::HashMap;
 use super::error::OpenAPIError;
-use openapiv3::{Operation, ReferenceOr, SchemaKind};
+use openapiv3::{Operation, ReferenceOr, SchemaKind, ParameterSchemaOrContent};
 use crate::api::definition::patterns::{AllPathPatterns, PathPattern};
 use tracing::warn;
 
 pub fn validate_openapi(spec: &OpenAPISpec) -> Result<(), String> {
     validate_paths(&spec.paths)?;
-    let schemas = spec.components.as_ref().and_then(|c| c.schemas.as_ref());
-    validate_schemas(schemas)?;
+    // Here, `spec.components.as_ref().and_then(|c| c.schemas.as_ref())` returns an Option<&HashMap<...>>
+    // but `validate_schemas` expects an Option<HashMap<...>> or we can make it accept Option<&HashMap<...>>
+    // Let's clone the schemas if they exist.
+    let schemas = spec
+        .components
+        .as_ref()
+        .and_then(|c| c.schemas.as_ref().map(|h| h.clone()));
+    validate_schemas(&schemas)?;
     Ok(())
 }
 
@@ -20,10 +26,10 @@ fn validate_paths(paths: &HashMap<String, PathItem>) -> Result<(), String> {
         if let Some(op) = &item.post {
              validate_operation(path, op)?;
         }
-         if let Some(op) = &item.put {
+        if let Some(op) = &item.put {
               validate_operation(path, op)?;
         }
-         if let Some(op) = &item.delete {
+        if let Some(op) = &item.delete {
               validate_operation(path, op)?;
         }
     }
@@ -37,7 +43,6 @@ fn validate_operation(path: &str, op: &super::types::Operation) -> Result<(), St
     Ok(())
 }
 
-
 fn validate_parameters(path: &str, params: &Vec<super::types::Parameter>) -> Result<(), String> {
     for p in params.iter() {
         if p.r#in == ParameterLocation::Path {
@@ -47,23 +52,21 @@ fn validate_parameters(path: &str, params: &Vec<super::types::Parameter>) -> Res
     Ok(())
 }
 
-
 fn validate_path_parameter(path: &str, p: &super::types::Parameter) -> Result<(), String> {
     let path_segments: Vec<&str> = path.split('/').collect();
-      let matching_segments = path_segments
-            .iter()
-            .filter(|segment| segment.starts_with('{') && segment.ends_with('}'))
-            .map(|segment| segment[1..segment.len() - 1].to_string()).collect::<Vec<_>>();
-    
-        if !matching_segments.iter().any(|s| s == &p.name) {
-            return Err(format!(
-                "Path parameter `{}` not found in path `{}`",
-                p.name, path
-            ));
-        }
-        Ok(())
-}
+    let matching_segments = path_segments
+        .iter()
+        .filter(|segment| segment.starts_with('{') && segment.ends_with('}'))
+        .map(|segment| segment[1..segment.len() - 1].to_string()).collect::<Vec<_>>();
 
+    if !matching_segments.iter().any(|s| s == &p.name) {
+        return Err(format!(
+            "Path parameter `{}` not found in path `{}`",
+            p.name, path
+        ));
+    }
+    Ok(())
+}
 
 fn validate_schemas(schemas: &Option<HashMap<String, crate::api::openapi::OpenAPISchema>>) -> Result<(), String> {
     if let Some(schemas) = schemas {
@@ -129,7 +132,7 @@ fn validate_schema_ref(_key: &String, reference: &String) -> Result<(), String> 
             reference
         ));
    }
-      Ok(())
+   Ok(())
 }
 
 pub(crate) fn validate_path_pattern(path: &str) -> Result<(), OpenAPIError> {
@@ -185,8 +188,25 @@ pub(crate) fn validate_operation_types(operation: &Operation) -> Result<(), Open
     // Validate parameters
     for param in &operation.parameters {
         if let openapiv3::ReferenceOr::Item(param) = param {
-            if let Some(schema) = &param.parameter_data().schema {
-                validate_parameter_schema(schema)?;
+            // Parameter is an enum: Query, Path, Header, Cookie
+            // Each variant has parameter_data field.
+            let parameter_data = match param {
+                openapiv3::Parameter::Query { parameter_data, .. } => parameter_data,
+                openapiv3::Parameter::Path { parameter_data, .. } => parameter_data,
+                openapiv3::Parameter::Header { parameter_data, .. } => parameter_data,
+                openapiv3::Parameter::Cookie { parameter_data, .. } => parameter_data,
+            };
+
+            // parameter_data has 'format: ParameterSchemaOrContent'
+            if let ParameterSchemaOrContent::Schema(schema_ref) = &parameter_data.format {
+                if let ReferenceOr::Item(schema) = schema_ref {
+                    validate_parameter_schema(schema)?;
+                }
+            } else {
+                // If content is encountered instead of schema, we can handle accordingly
+                return Err(OpenAPIError::ValidationFailed(
+                    "Unsupported parameter content type".into()
+                ));
             }
         }
     }
@@ -219,6 +239,7 @@ fn validate_parameter_schema(schema: &crate::api::openapi::OpenAPISchema) -> Res
     }
 }
 
+#[cfg(test)]
 mod tests {
     #[test]
     fn test_parameter_name_validation() {

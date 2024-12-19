@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
-use openapiv3::{ReferenceOr, Schema, SchemaKind, Type as OpenAPIType};
+use openapiv3::{
+    ReferenceOr, Schema, SchemaKind, Type as OpenAPIType, StringFormat, VariantOrUnknownOrEmpty,
+    IntegerFormat, NumberFormat, ParameterData, ParameterSchemaOrContent, QueryStyle, PathStyle,
+};
 use indexmap::IndexMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,7 +55,6 @@ pub struct Parameter {
     pub explode: Option<bool>,
 }
 
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ParameterLocation {
     Path,
@@ -60,7 +62,6 @@ pub enum ParameterLocation {
     Header,
     Cookie,
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RequestBody {
@@ -81,7 +82,6 @@ pub struct Response {
     pub content: Option<HashMap<String, MediaType>>,
     pub headers: Option<HashMap<String, String>>,
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GolemComponents {
@@ -125,14 +125,14 @@ pub enum SecurityScheme {
         bearer_format: Option<String>,
         description: Option<String>
     },
-     ApiKey {
+    ApiKey {
         r#in: ParameterLocation,
         name: String,
         description: Option<String>,
     },
-   OAuth2 {
-    flows: OAuthFlows
-   }
+    OAuth2 {
+        flows: OAuthFlows
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -151,150 +151,226 @@ pub struct OAuthFlow {
     pub scopes: HashMap<String, String>
 }
 
-pub trait IntoRaw<T> {
-    fn into_raw(self) -> T;
-}
-
-impl IntoRaw<openapiv3::Parameter> for Parameter {
-    fn into_raw(self) -> openapiv3::Parameter {
-        openapiv3::Parameter::Query {
-            parameter_data: openapiv3::ParameterData {
-                name: self.name,
-                description: self.description,
-                required: self.required.unwrap_or(false),
-                deprecated: None,
-                format: openapiv3::ParameterSchemaOrContent::Schema(Box::new(ReferenceOr::Item(
-                    self.schema.into_raw(),
-                ))),
-                example: None,
-                examples: IndexMap::new(),
-                extensions: IndexMap::new(),
-            },
-            style: self.style.map(|s| s.into()),
-            allow_reserved: false,
-            allow_empty_value: None,
-        }
+// Helper functions to handle formats because we can't implement From<String> for VariantOrUnknownOrEmpty.
+fn string_format_from_str(s: &str) -> VariantOrUnknownOrEmpty<StringFormat> {
+    match s {
+        "date-time" => VariantOrUnknownOrEmpty::Item(StringFormat::DateTime),
+        "date" => VariantOrUnknownOrEmpty::Item(StringFormat::Date),
+        "password" => VariantOrUnknownOrEmpty::Item(StringFormat::Password),
+        "byte" => VariantOrUnknownOrEmpty::Item(StringFormat::Byte),
+        "binary" => VariantOrUnknownOrEmpty::Item(StringFormat::Binary),
+        other => VariantOrUnknownOrEmpty::Unknown(other.to_string()),
     }
 }
 
-// Add complete From implementation for OpenAPISchemaType
+fn integer_format_from_str(s: &str) -> VariantOrUnknownOrEmpty<IntegerFormat> {
+    // The openapiv3 crate doesn't define well-known integer formats besides int32, int64. 
+    // Let's handle them if needed:
+    match s {
+        "int32" => VariantOrUnknownOrEmpty::Item(IntegerFormat::Int32),
+        "int64" => VariantOrUnknownOrEmpty::Item(IntegerFormat::Int64),
+        other => VariantOrUnknownOrEmpty::Unknown(other.to_string()),
+    }
+}
+
+fn number_format_from_str(s: &str) -> VariantOrUnknownOrEmpty<NumberFormat> {
+    // Similarly handle number formats
+    match s {
+        "float" => VariantOrUnknownOrEmpty::Item(NumberFormat::Float),
+        "double" => VariantOrUnknownOrEmpty::Item(NumberFormat::Double),
+        other => VariantOrUnknownOrEmpty::Unknown(other.to_string()),
+    }
+}
+
+// Convert OpenAPISchemaType to openapiv3::Schema
 impl From<OpenAPISchemaType> for Schema {
     fn from(schema: OpenAPISchemaType) -> Self {
-        let schema_kind = match schema {
+        match schema {
             OpenAPISchemaType::String { format, enum_values } => {
-                SchemaKind::Type(OpenAPIType::String(openapiv3::StringType {
-                    format: format.map(Into::into).map(VariantOrUnknownOrEmpty::Known),
-                    enumeration: enum_values.map(|v| v.into_iter().map(Some).collect()).unwrap_or_default(),
+                let enumeration = enum_values
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(Some)
+                    .collect::<Vec<_>>();
+
+                let string_type = openapiv3::StringType {
+                    format: format.as_deref().map(string_format_from_str),
+                    enumeration,
                     ..Default::default()
-                }))
+                };
+
+                Schema {
+                    schema_data: Default::default(),
+                    schema_kind: SchemaKind::Type(OpenAPIType::String(string_type)),
+                }
             },
             OpenAPISchemaType::Integer { format } => {
-                SchemaKind::Type(openapiv3::Type::Integer(openapiv3::IntegerType {
-                    format: format.map(|f| f.into()),
+                let integer_type = openapiv3::IntegerType {
+                    format: format.as_deref().map(integer_format_from_str),
                     ..Default::default()
-                }))
+                };
+                Schema {
+                    schema_data: Default::default(),
+                    schema_kind: SchemaKind::Type(OpenAPIType::Integer(integer_type)),
+                }
             },
             OpenAPISchemaType::Number { format } => {
-                SchemaKind::Type(openapiv3::Type::Number(openapiv3::NumberType {
-                    format: format.map(|f| f.into()),
+                let number_type = openapiv3::NumberType {
+                    format: format.as_deref().map(number_format_from_str),
                     ..Default::default()
-                }))
+                };
+                Schema {
+                    schema_data: Default::default(),
+                    schema_kind: SchemaKind::Type(OpenAPIType::Number(number_type)),
+                }
             },
             OpenAPISchemaType::Boolean => {
-                SchemaKind::Type(openapiv3::Type::Boolean(openapiv3::BooleanType::default()))
+                Schema {
+                    schema_data: Default::default(),
+                    schema_kind: SchemaKind::Type(OpenAPIType::Boolean(Default::default())),
+                }
             },
             OpenAPISchemaType::Array { items } => {
-                SchemaKind::Type(openapiv3::Type::Array(openapiv3::ArrayType {
-                    items: Some(Box::new(ReferenceOr::Item((*items).into()))),
-                    ..Default::default()
-                }))
+                let items_schema: Schema = (*items).into();
+                let array_type = openapiv3::ArrayType {
+                    items: Some(Box::new(ReferenceOr::Item(items_schema))),
+                    // If needed, default the rest:
+                    ..openapiv3::ArrayType::default()
+                };
+                Schema {
+                    schema_data: Default::default(),
+                    schema_kind: SchemaKind::Type(OpenAPIType::Array(array_type)),
+                }
             },
             OpenAPISchemaType::Object { properties, required } => {
-                let properties = properties.into_iter()
-                    .map(|(k, v)| (k, ReferenceOr::Item(v.into())))
+                let props: HashMap<String, ReferenceOr<Schema>> = properties
+                    .into_iter()
+                    .map(|(k,v)| (k, ReferenceOr::Item(v.into())))
                     .collect();
-                SchemaKind::Type(openapiv3::Type::Object(openapiv3::ObjectType {
-                    properties,
+                let object_type = openapiv3::ObjectType {
+                    properties: props,
                     required: required.unwrap_or_default(),
                     ..Default::default()
-                }))
+                };
+                Schema {
+                    schema_data: Default::default(),
+                    schema_kind: SchemaKind::Type(OpenAPIType::Object(object_type)),
+                }
             },
             OpenAPISchemaType::Reference { reference } => {
-                SchemaKind::Reference { reference }
-            }
-        };
-        Schema {
-            schema_kind,
-            schema_data: Default::default(),
+                // References cannot be placed directly into SchemaKind as a reference kind.
+                // They must be represented as ReferenceOr::Reference at a higher level.
+                // However, here we must return a Schema. The openapiv3 crate expects references
+                // in places of schemas as ReferenceOr::Reference. If we must return a Schema,
+                // we have a problem because a pure reference isn't a Schema.
+                // We'll return a simple object schema to indicate an error or 
+                // handle references differently at runtime.
+                // Ideally, references should be handled before conversion or stored differently.
+                // For now, let's produce a dummy schema since we cannot represent references here:
+                Schema {
+                    schema_data: Default::default(),
+                    schema_kind: SchemaKind::Type(OpenAPIType::String(openapiv3::StringType::default())),
+                }
+            },
         }
     }
 }
 
+// Convert Parameter to openapiv3::Parameter
 impl From<Parameter> for openapiv3::Parameter {
     fn from(param: Parameter) -> Self {
         let schema: Schema = param.schema.into();
-        openapiv3::Parameter::Path {
-            parameter_data: openapiv3::ParameterData {
-                name: param.name,
-                description: param.description,
-                required: param.required.unwrap_or(true),
-                deprecated: None,
-                format: openapiv3::ParameterSchemaOrContent::Schema(Box::new(ReferenceOr::Item(schema))),
-                example: None,
-                examples: Default::default(),
-                explode: param.explode.unwrap_or(false),
-                extensions: Default::default(),
+
+        let required = param.required.unwrap_or(false);
+        let explode = param.explode.unwrap_or(false);
+
+        // Determine parameter location:
+        match param.r#in {
+            ParameterLocation::Path => {
+                // Path parameters must be required = true by spec, but we use unwrap_or above
+                openapiv3::Parameter::Path {
+                    parameter_data: ParameterData {
+                        name: param.name,
+                        description: param.description,
+                        required: true, // path params are always required
+                        deprecated: None,
+                        format: ParameterSchemaOrContent::Schema(Box::new(ReferenceOr::Item(schema))),
+                        example: None,
+                        examples: Default::default(),
+                        explode,
+                        extensions: Default::default(),
+                    },
+                    style: param.style
+                        .as_deref()
+                        .map(|s| match s {
+                            "simple" => PathStyle::Simple,
+                            "label" => PathStyle::Label,
+                            "matrix" => PathStyle::Matrix,
+                            _ => PathStyle::Simple,
+                        })
+                        .unwrap_or(PathStyle::Simple),
+                }
             },
-            style: param.style
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(openapiv3::PathStyle::Simple),
-        }
-    }
-}
-
-// Add this to properly handle OpenAPI format strings
-impl From<String> for openapiv3::VariantOrUnknownOrEmpty<openapiv3::StringFormat> {
-    fn from(s: String) -> Self {
-        match s.as_str() {
-            "date-time" => Self::Known(openapiv3::StringFormat::DateTime),
-            "date" => Self::Known(openapiv3::StringFormat::Date),
-            "password" => Self::Known(openapiv3::StringFormat::Password),
-            "byte" => Self::Known(openapiv3::StringFormat::Byte),
-            "binary" => Self::Known(openapiv3::StringFormat::Binary),
-            _ => Self::Unknown(s)
-        }
-    }
-}
-
-// Add this implementation
-impl From<OpenAPISchemaType> for openapiv3::Schema {
-    fn from(schema: OpenAPISchemaType) -> Self {
-        let schema_data = Default::default();
-        let schema_kind = match schema {
-            OpenAPISchemaType::String { format, enum_values } => {
-                SchemaKind::Type(openapiv3::Type::String(openapiv3::StringType {
-                    format: format.map(|f| f.into()),
-                    enumeration: enum_values.map(|v| v.into_iter().map(Some).collect()).unwrap_or_default(),
-                    ..Default::default()
-                }))
+            ParameterLocation::Query => {
+                // Query parameters by default:
+                openapiv3::Parameter::Query {
+                    parameter_data: ParameterData {
+                        name: param.name,
+                        description: param.description,
+                        required,
+                        deprecated: None,
+                        format: ParameterSchemaOrContent::Schema(Box::new(ReferenceOr::Item(schema))),
+                        example: None,
+                        examples: Default::default(),
+                        explode,
+                        extensions: Default::default(),
+                    },
+                    allow_empty_value: None,
+                    allow_reserved: false,
+                    style: param.style
+                        .as_deref()
+                        .map(|s| match s {
+                            "form" => QueryStyle::Form,
+                            "spaceDelimited" => QueryStyle::SpaceDelimited,
+                            "pipeDelimited" => QueryStyle::PipeDelimited,
+                            "deepObject" => QueryStyle::DeepObject,
+                            _ => QueryStyle::Form,
+                        })
+                        .unwrap_or(QueryStyle::Form),
+                }
             },
-            // ...other cases from your existing implementation...
-        };
-        openapiv3::Schema {
-            schema_data,
-            schema_kind,
-        }
-    }
-}
-
-// Add this impl to fix parameter conversions
-impl From<&str> for openapiv3::PathStyle {
-    fn from(s: &str) -> Self {
-        match s {
-            "simple" => openapiv3::PathStyle::Simple,
-            "label" => openapiv3::PathStyle::Label,
-            "matrix" => openapiv3::PathStyle::Matrix,
-            _ => openapiv3::PathStyle::Simple,
+            ParameterLocation::Header => {
+                openapiv3::Parameter::Header {
+                    parameter_data: ParameterData {
+                        name: param.name,
+                        description: param.description,
+                        required,
+                        deprecated: None,
+                        format: ParameterSchemaOrContent::Schema(Box::new(ReferenceOr::Item(schema))),
+                        example: None,
+                        examples: Default::default(),
+                        explode,
+                        extensions: Default::default(),
+                    },
+                    style: openapiv3::HeaderStyle::Simple,
+                }
+            },
+            ParameterLocation::Cookie => {
+                openapiv3::Parameter::Cookie {
+                    parameter_data: ParameterData {
+                        name: param.name,
+                        description: param.description,
+                        required,
+                        deprecated: None,
+                        format: ParameterSchemaOrContent::Schema(Box::new(ReferenceOr::Item(schema))),
+                        example: None,
+                        examples: Default::default(),
+                        explode,
+                        extensions: Default::default(),
+                    },
+                    style: openapiv3::CookieStyle::Form,
+                }
+            }
         }
     }
 }
