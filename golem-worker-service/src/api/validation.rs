@@ -1,22 +1,30 @@
+use std::collections::HashSet;
 use crate::api::definition::types::{ApiDefinition, BindingType};
+use crate::api::errors::{ValidationError, ValidationResult};
 use golem_wasm_ast::analysis::AnalysedType;
 
-#[derive(Debug, PartialEq)]
-enum TypeConstraint {
-    Input,
-    Output,
-}
+pub fn validate_api_definition(api: &ApiDefinition) -> ValidationResult<()> {
+    let mut errors = Vec::new();
 
-pub fn validate_api_definition(api: &ApiDefinition) -> Result<(), String> {
+    // Validate routes uniqueness
+    if let Err(err) = validate_route_uniqueness(&api.routes) {
+        errors.push(err.to_string());
+    }
+
+    // Validate route types
     for route in &api.routes {
         if let BindingType::Default { input_type, output_type, .. } = &route.binding {
-            // Basic validation only - type conversion happens later
-            if input_type.is_empty() || output_type.is_empty() {
-                return Err(format!("Empty type for path {}", route.path));
+            if let Err(err) = validate_type_compatibility(input_type, output_type) {
+                errors.push(format!("Route {}: {}", route.path, err));
             }
         }
     }
-    Ok(())
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(ValidationError::Multiple(errors))
+    }
 }
 
 fn validate_type_constraints(typ: &AnalysedType, constraint: TypeConstraint) -> Result<(), String> {
@@ -26,8 +34,7 @@ fn validate_type_constraints(typ: &AnalysedType, constraint: TypeConstraint) -> 
         (AnalysedType::S64(_), _) |
         (AnalysedType::F32(_), _) |
         (AnalysedType::F64(_), _) |
-        (AnalysedType::Bool(_), _) |
-        (AnalysedType::Unit(_), _) => Ok(()),
+        (AnalysedType::Bool(_), _) => Ok(()),
 
         // Validate lists
         (AnalysedType::List(l), c) => validate_type_constraints(&l.inner, c),
@@ -65,8 +72,7 @@ fn are_types_compatible(input: &AnalysedType, output: &AnalysedType) -> bool {
         (AnalysedType::S64(_), AnalysedType::S64(_)) |
         (AnalysedType::F32(_), AnalysedType::F32(_)) |
         (AnalysedType::F64(_), AnalysedType::F64(_)) |
-        (AnalysedType::Bool(_), AnalysedType::Bool(_)) |
-        (AnalysedType::Unit(_), AnalysedType::Unit(_)) => true,
+        (AnalysedType::Bool(_), AnalysedType::Bool(_)) => true,
 
         // Check list compatibility
         (AnalysedType::List(l1), AnalysedType::List(l2)) => 
@@ -85,18 +91,24 @@ fn are_types_compatible(input: &AnalysedType, output: &AnalysedType) -> bool {
     }
 }
 
-// Update validate_wit_binding_types to handle string types
-fn validate_wit_binding_types(
-    input_type: &str,
-    output_type: &str,
-    path: &str,
-) -> Result<(), String> {
-    // Simple validation that types are not empty
-    if input_type.is_empty() {
-        return Err(format!("Empty input type for path {}", path));
+fn validate_route_uniqueness(routes: &[Route]) -> ValidationResult<()> {
+    let mut seen_routes = HashSet::new();
+    
+    for route in routes {
+        let route_key = format!("{} {}", route.method, route.path);
+        if !seen_routes.insert(route_key.clone()) {
+            return Err(ValidationError::Route(format!("Duplicate route: {}", route_key)));
+        }
     }
-    if output_type.is_empty() {
-        return Err(format!("Empty output type for path {}", path));
+    
+    Ok(())
+}
+
+fn validate_type_compatibility(input: &AnalysedType, output: &AnalysedType) -> ValidationResult<()> {
+    if !are_types_compatible(input, output) {
+        return Err(ValidationError::Type(
+            format!("Incompatible types: input {:?}, output {:?}", input, output)
+        ));
     }
     Ok(())
 }
@@ -161,5 +173,38 @@ mod tests {
             ],
         };
         assert!(validate_api_definition(&api).is_err());
+    }
+
+    #[test]
+    fn test_duplicate_routes() {
+        let routes = vec![
+            Route {
+                path: "/test".to_string(),
+                method: HttpMethod::Get,
+                description: "Test 1".to_string(),
+                template_name: "test1".to_string(),
+                binding: BindingType::Default {
+                    input_type: AnalysedType::Str(TypeStr),
+                    output_type: AnalysedType::Str(TypeStr),
+                    function_name: "test1".to_string(),
+                },
+            },
+            Route {
+                path: "/test".to_string(),
+                method: HttpMethod::Get,
+                description: "Test 2".to_string(),
+                template_name: "test2".to_string(),
+                binding: BindingType::Default {
+                    input_type: AnalysedType::Str(TypeStr),
+                    output_type: AnalysedType::Str(TypeStr),
+                    function_name: "test2".to_string(),
+                },
+            },
+        ];
+
+        assert!(matches!(
+            validate_route_uniqueness(&routes),
+            Err(ValidationError::Route(_))
+        ));
     }
 }
