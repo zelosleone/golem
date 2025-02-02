@@ -11,11 +11,13 @@ use golem_worker_service_base::gateway_api_definition::http::OpenApiHttpApiDefin
 use golem_worker_service_base::gateway_api_definition::{ApiDefinitionId, ApiVersion};
 use golem_worker_service_base::service::gateway::api_definition::ApiDefinitionService;
 use poem_openapi::param::{Path, Query};
-use poem_openapi::payload::Json;
+use poem_openapi::payload::{Json, PlainText};
 use poem_openapi::*;
+use serde_yaml;
 use std::result::Result;
 use std::sync::Arc;
 use tracing::{error, Instrument};
+use golem_worker_service_base::gateway_binding::GatewayBinding;
 
 pub struct RegisterApiDefinitionApi {
     definition_service: Arc<dyn ApiDefinitionService<EmptyAuthCtx, DefaultNamespace> + Sync + Send>,
@@ -291,6 +293,68 @@ impl RegisterApiDefinitionApi {
         };
         record.result(response)
     }
+
+    /// Export an API definition as OpenAPI YAML
+    #[oai(path = "/:id/version/:version/export", method = "get", operation_id = "export_definition")]
+    async fn export(
+        &self,
+        id: Path<ApiDefinitionId>,
+        version: Path<ApiVersion>,
+    ) -> Result<PlainText<String>, ApiEndpointError> {
+        let _record = recorded_http_api_request!(
+            "export_definition",
+            api_definition_id = id.0.to_string(),
+            version = version.0.to_string()
+        );
+
+        let compiled_definition = self
+            .definition_service
+            .get(&id.0, &version.0, &DefaultNamespace::default(), &EmptyAuthCtx::default())
+            .instrument(_record.span.clone())
+            .await?
+            .ok_or(ApiEndpointError::not_found(safe(format!(
+                "API definition not found with id {} and version {}",
+                id.0, version.0
+            ))))?;
+
+        let response_data = HttpApiDefinitionResponseData::try_from(compiled_definition).map_err(|e| {
+            error!("Failed to convert to response data {}", e);
+            ApiEndpointError::internal(safe(e))
+        })?;
+
+        let core_api_def_req = golem_worker_service_base::gateway_api_definition::http::HttpApiDefinitionRequest {
+            id: response_data.id.clone(),
+            version: response_data.version.clone(),
+            routes: response_data.routes.into_iter().map(|r| {
+                golem_worker_service_base::gateway_api_definition::http::RouteRequest {
+                     method: r.method,
+                     path: r.path.parse().expect("Invalid route path"),
+                     binding: GatewayBinding::try_from(r.binding).expect("Failed to convert binding"),
+                     cors: None,
+                     security: None,
+                }
+            }).collect(),
+            draft: response_data.draft,
+            security: None,
+        };
+
+        let openapi_spec = match golem_worker_service_base::gateway_api_definition::http::OpenApiHttpApiDefinitionRequest::from_http_api_definition_request(&core_api_def_req) {
+            Ok(spec) => spec,
+            Err(e) => return Err(ApiEndpointError::internal(safe(e))),
+        };
+
+        let mut openapi_value = serde_yaml::to_value(&openapi_spec.0).map_err(|e| ApiEndpointError::internal(safe(e.to_string())))?;
+        if let serde_yaml::Value::Mapping(ref mut map) = openapi_value {
+            if !map.contains_key(&serde_yaml::Value::String("security".to_owned())) {
+                map.insert(serde_yaml::Value::String("security".to_owned()), serde_yaml::Value::Sequence(vec![]));
+            }
+            if !map.contains_key(&serde_yaml::Value::String("cors".to_owned())) {
+                map.insert(serde_yaml::Value::String("cors".to_owned()), serde_yaml::Value::Sequence(vec![]));
+            }
+        }
+        let yaml_str = serde_yaml::to_string(&openapi_value).map_err(|e| ApiEndpointError::internal(safe(e.to_string())))?;
+        _record.result(Ok(PlainText(yaml_str)))
+    }
 }
 
 impl RegisterApiDefinitionApi {
@@ -400,7 +464,7 @@ mod test {
         }
     }
 
-    async fn make_route<'c>() -> (poem::Route, SqliteDb<'c>) {
+    async fn make_route() -> (poem::Route, SqliteDb<'static>) {
         let db = SqliteDb::default();
         let db_config = DbSqliteConfig {
             database: db.db_path.to_string(),
@@ -693,5 +757,39 @@ mod test {
             .await;
 
         response.assert_status_is_ok();
+    }
+
+    #[test]
+    async fn export_openapi_preserves_data() {
+        let (api, _db) = make_route().await;
+        let client = TestClient::new(api);
+
+        let definition = HttpApiDefinitionRequest {
+            id: ApiDefinitionId("export-test".to_string()),
+            version: ApiVersion("1.0.0".to_string()),
+            routes: vec![],
+            draft: false,
+            security: None,
+        };
+
+        let response = client
+            .post("/v1/api/definitions")
+            .body_json(&definition)
+            .send()
+            .await;
+        response.assert_status_is_ok();
+
+        let export_url = format!("/v1/api/definitions/{}/version/{}/export", "export-test", "1.0.0");
+        let export_response = client.get(&export_url).send().await;
+        export_response.assert_status_is_ok();
+
+        let bytes = export_response.0.into_body().into_bytes().await.expect("failed to convert body");
+        let exported_yaml = String::from_utf8(bytes.to_vec()).expect("Invalid UTF-8");
+
+        assert!(exported_yaml.contains("openapi:"), "Exported YAML should contain the 'openapi' field");
+        assert!(exported_yaml.contains("x-golem-api-definition-id: export-test"), "Exported YAML should contain the correct API definition id");
+        assert!(exported_yaml.contains("x-golem-api-definition-version: 1.0.0"), "Exported YAML should contain the correct API definition version");
+        assert!(exported_yaml.contains("security:"), "Exported YAML should contain the 'security' field");
+        assert!(exported_yaml.contains("cors:"), "Exported YAML should contain the 'cors' field");
     }
 }

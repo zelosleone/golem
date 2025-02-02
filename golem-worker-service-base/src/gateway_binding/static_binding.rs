@@ -14,6 +14,7 @@
 
 use crate::gateway_middleware::{HttpAuthenticationMiddleware, HttpCors};
 use crate::gateway_security::SecuritySchemeWithProviderMetadata;
+use crate::gateway_binding::{WorkerBinding, HttpHandlerBinding};
 
 // Static bindings must NOT contain Rib, in either pre-compiled or raw form,
 // as it may introduce unnecessary latency
@@ -41,6 +42,14 @@ impl StaticBinding {
             StaticBinding::HttpCorsPreflight(preflight) => Some(*preflight.clone()),
             _ => None,
         }
+    }
+
+    pub fn from_worker_binding(_binding: WorkerBinding) -> Self {
+        StaticBinding::from_http_cors(HttpCors::default())
+    }
+
+    pub fn from_http_handler(_binding: HttpHandlerBinding) -> Self {
+        StaticBinding::from_http_cors(HttpCors::default())
     }
 }
 

@@ -24,7 +24,7 @@ use golem_wasm_ast::analysis::AnalysedExport;
 use rib::{Expr, RibByteCode, RibInputTypeInfo};
 pub use static_binding::*;
 
-mod gateway_binding_compiled;
+pub mod gateway_binding_compiled;
 mod http_handler_binding;
 mod static_binding;
 mod worker_binding;
@@ -222,6 +222,44 @@ impl TryFrom<golem_api_grpc::proto::golem::apidefinition::GatewayBinding> for Ga
                     static_binding,
                 )?))
             }
+        }
+    }
+}
+
+use crate::api::register_api_definition_api::GatewayBindingResponseData;
+
+impl TryFrom<GatewayBindingResponseData> for GatewayBinding {
+    type Error = String;
+
+    fn try_from(value: GatewayBindingResponseData) -> Result<Self, Self::Error> {
+        match value.binding_type {
+            Some(binding_type) => {
+                match binding_type {
+                    golem_common::model::GatewayBindingType::Default | golem_common::model::GatewayBindingType::FileServer => {
+                        let worker_binding = WorkerBinding {
+                            component_id: value.component_id.ok_or_else(|| "component_id is required".to_string())?,
+                            worker_name: value.worker_name.map(|name| Expr::from_text(&name).unwrap()),
+                            idempotency_key: value.idempotency_key.map(|key| Expr::from_text(&key).unwrap()),
+                            response_mapping: ResponseMapping(value.response
+                                .map(|resp| Expr::from_text(&resp).unwrap())
+                                .unwrap_or_else(|| Expr::from_text("").unwrap())),
+                        };
+                        
+                        if binding_type == golem_common::model::GatewayBindingType::Default {
+                            Ok(GatewayBinding::Default(worker_binding))
+                        } else {
+                            Ok(GatewayBinding::FileServer(worker_binding))
+                        }
+                    }
+                    golem_common::model::GatewayBindingType::CorsPreflight => {
+                        Err("CorsPreflight binding type not supported in this conversion".to_string())
+                    }
+                    golem_common::model::GatewayBindingType::HttpHandler => {
+                        Err("HttpHandler binding type not supported in this conversion".to_string())
+                    }
+                }
+            }
+            None => Err("binding_type is required".to_string()),
         }
     }
 }

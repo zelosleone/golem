@@ -21,6 +21,21 @@ use poem_openapi::types::{ParseError, ParseFromJSON, ParseFromYAML, ParseResult}
 use serde_json::Value;
 use std::borrow::Cow;
 
+pub trait RibDefinitionProvider {
+    fn get_rib_output(&self) -> Option<rib::RibOutputTypeInfo>;
+    fn get_rib_input(&self) -> Option<rib::RibInputTypeInfo>;
+}
+
+impl RibDefinitionProvider for HttpApiDefinitionRequest {
+    fn get_rib_output(&self) -> Option<rib::RibOutputTypeInfo> {
+        None
+    }
+    
+    fn get_rib_input(&self) -> Option<rib::RibInputTypeInfo> {
+        None
+    }
+}
+
 pub struct OpenApiHttpApiDefinitionRequest(pub OpenAPI);
 
 impl OpenApiHttpApiDefinitionRequest {
@@ -47,6 +62,71 @@ impl OpenApiHttpApiDefinitionRequest {
             draft: true,
             security,
         })
+    }
+
+    pub fn from_http_api_definition_request(req: &crate::gateway_api_definition::http::HttpApiDefinitionRequest) -> Result<Self, String> {
+        // Create a default OpenAPI spec
+        let mut openapi = openapiv3::OpenAPI::default();
+
+        // Set root extensions for API definition id and version
+        openapi.extensions.insert(GOLEM_API_DEFINITION_ID_EXTENSION.to_string(), serde_json::Value::String((req.id).0.clone()));
+        openapi.extensions.insert(GOLEM_API_DEFINITION_VERSION.to_string(), serde_json::Value::String((req.version).0.clone()));
+
+        // Build paths from the internal routes
+        let mut paths = openapiv3::Paths::default();
+        for route in &req.routes {
+            let path_str = route.path.to_string();
+            let mut operation = openapiv3::Operation::default();
+
+            // Add binding info as an extension
+            operation.extensions.insert("x-golem-binding".to_string(), serde_json::json!(format!("{:?}", route.binding)));
+            
+            // Add security information if present
+            if let Some(ref sec) = route.security {
+                let sec_val = serde_json::json!([{ "scheme": format!("{:?}", sec.security_scheme_identifier) }]);
+                operation.extensions.insert("x-golem-security".to_string(), sec_val);
+            }
+            
+            // Add CORS information if available
+            if let Some(ref cors) = route.cors {
+                let cors_val = serde_json::to_value(cors).map_err(|e| e.to_string())?;
+                operation.extensions.insert("x-golem-cors".to_string(), cors_val);
+            }
+
+            // Insert the operation into the appropriate HTTP method of the PathItem
+            let path_item = paths.paths.entry(path_str).or_insert_with(|| openapiv3::ReferenceOr::Item(openapiv3::PathItem::default()));
+            if let openapiv3::ReferenceOr::Item(ref mut item) = path_item {
+                match route.method {
+                    crate::gateway_api_definition::http::MethodPattern::Get => item.get = Some(operation.clone()),
+                    crate::gateway_api_definition::http::MethodPattern::Post => item.post = Some(operation.clone()),
+                    crate::gateway_api_definition::http::MethodPattern::Put => item.put = Some(operation.clone()),
+                    crate::gateway_api_definition::http::MethodPattern::Delete => item.delete = Some(operation.clone()),
+                    crate::gateway_api_definition::http::MethodPattern::Options => item.options = Some(operation.clone()),
+                    crate::gateway_api_definition::http::MethodPattern::Head => item.head = Some(operation.clone()),
+                    crate::gateway_api_definition::http::MethodPattern::Patch => item.patch = Some(operation.clone()),
+                    crate::gateway_api_definition::http::MethodPattern::Trace => item.trace = Some(operation.clone()),
+                    crate::gateway_api_definition::http::MethodPattern::Connect => return Err("OpenAPI 3.0.0 does not support the CONNECT method".to_string()),
+                }
+            }
+        }
+        openapi.paths = paths;
+
+        // Insert strongly typed rib definitions as extensions if available
+        if let Some(rib_output) = req.get_rib_output() {
+            openapi.extensions.insert(
+                "x-golem-rib-output-type".to_string(),
+                serde_json::to_value(rib_output).map_err(|e| e.to_string())?
+            );
+        }
+
+        if let Some(rib_input) = req.get_rib_input() {
+            openapi.extensions.insert(
+                "x-golem-rib-input-type".to_string(),
+                serde_json::to_value(rib_input).map_err(|e| e.to_string())?
+            );
+        }
+
+        Ok(OpenApiHttpApiDefinitionRequest(openapi))
     }
 }
 
@@ -127,7 +207,8 @@ mod internal {
         GatewayBinding, HttpHandlerBinding, ResponseMapping, StaticBinding, WorkerBinding,
     };
     use crate::gateway_middleware::{CorsPreflightExpr, HttpCors};
-    use crate::gateway_security::{SecuritySchemeIdentifier, SecuritySchemeReference};
+    use crate::gateway_security::SecuritySchemeReference;
+    use crate::gateway_security::SecuritySchemeIdentifier;
     use golem_service_base::model::VersionedComponentId;
     use uuid::Uuid;
 
@@ -263,7 +344,7 @@ mod internal {
                         Ok(RouteRequest {
                             path: path_pattern.clone(),
                             method,
-                            binding: GatewayBinding::Default(binding),
+                            binding: GatewayBinding::static_binding(StaticBinding::from_worker_binding(binding)),
                             security,
                             cors: None
                         })
@@ -274,7 +355,7 @@ mod internal {
                         Ok(RouteRequest {
                             path: path_pattern.clone(),
                             method,
-                            binding: GatewayBinding::Default(binding),
+                            binding: GatewayBinding::static_binding(StaticBinding::from_worker_binding(binding)),
                             security,
                             cors: None
                         })
@@ -285,7 +366,7 @@ mod internal {
                         Ok(RouteRequest {
                             path: path_pattern.clone(),
                             method,
-                            binding: GatewayBinding::HttpHandler(binding),
+                            binding: GatewayBinding::static_binding(StaticBinding::from_http_handler(binding)),
                             security,
                             cors: None
                         })
@@ -462,12 +543,14 @@ mod tests {
 
     use super::*;
     use crate::gateway_api_definition::http::{AllPathPatterns, MethodPattern, RouteRequest};
-    use crate::gateway_binding::{GatewayBinding, StaticBinding};
     use crate::gateway_middleware::HttpCors;
+    use crate::gateway_security::SecuritySchemeReference;
 
     use openapiv3::Operation;
 
     use serde_json::json;
+
+    use crate::gateway_binding::{GatewayBinding, StaticBinding};
 
     #[test]
     fn test_get_route_with_cors_preflight_binding() {
@@ -549,6 +632,191 @@ mod tests {
             binding: GatewayBinding::static_binding(StaticBinding::from_http_cors(cors_preflight)),
             security: None,
             cors: None,
+        }
+    }
+
+    // A dummy security struct for testing
+    #[allow(dead_code)]
+    struct DummySecurity {
+        pub security_scheme_identifier: String,
+    }
+
+    // We implement a conversion so that our dummy security can be used in place of the actual type.
+    impl DummySecurity {
+        // This method is only needed so that our test code compiles when used in the conversion.
+        // Our conversion function simply uses Debug formatting.
+    }
+
+    #[test]
+    fn test_from_http_api_definition_request_get() {
+        // Create a dummy RouteRequest for the GET method with proper types
+        let route = RouteRequest {
+            method: MethodPattern::Get,
+            path: AllPathPatterns::parse("/test").unwrap(),
+            binding: GatewayBinding::static_binding(StaticBinding::from_http_cors(HttpCors::default())),
+            security: Some(SecuritySchemeReference::new("dummy-scheme".to_string())),
+            cors: Some(HttpCors::default()),
+        };
+
+        let req = HttpApiDefinitionRequest {
+            id: ApiDefinitionId("test_api".to_string()),
+            version: ApiVersion("1.0".to_string()),
+            routes: vec![route],
+            draft: true,
+            security: None,
+        };
+
+        let conversion = OpenApiHttpApiDefinitionRequest::from_http_api_definition_request(&req);
+        assert!(conversion.is_ok());
+        let openapi_req = conversion.unwrap().0;
+        // Check that id and version extensions are set
+        assert_eq!(
+            openapi_req.extensions.get(GOLEM_API_DEFINITION_ID_EXTENSION).unwrap(),
+            &serde_json::Value::String("test_api".to_string())
+        );
+        assert_eq!(
+            openapi_req.extensions.get(GOLEM_API_DEFINITION_VERSION).unwrap(),
+            &serde_json::Value::String("1.0".to_string())
+        );
+        // Check that the path has been created with a GET operation
+        let path_item = openapi_req.paths.paths.get(&"/test".to_string());
+        assert!(path_item.is_some(), "Path '/test' should exist");
+        if let Some(openapiv3::ReferenceOr::Item(item)) = path_item {
+            assert!(item.get.is_some(), "GET operation should be set");
+            // Verify security extension is set in the operation if provided
+            if let Some(op) = item.get.as_ref() {
+                let sec_ext = op.extensions.get("x-golem-security").unwrap();
+                // The security scheme is serialized using Debug formatting.
+                let expected_sec = serde_json::json!([{ "scheme": format!("{:?}", SecuritySchemeReference::new("dummy-scheme".to_string()).security_scheme_identifier) }]);
+                assert_eq!(sec_ext, &expected_sec);
+            }
+        } else {
+            panic!("Path item is not properly set");
+        }
+    }
+
+    #[test]
+    fn test_from_http_api_definition_request_connect_error() {
+        // Create a dummy RouteRequest for the CONNECT method (which is unsupported) with proper types
+        let route = RouteRequest {
+            method: MethodPattern::Connect,
+            path: AllPathPatterns::parse("/error").unwrap(),
+            binding: GatewayBinding::static_binding(StaticBinding::from_http_cors(HttpCors::default())),
+            security: None,
+            cors: None,
+        };
+
+        let req = HttpApiDefinitionRequest {
+            id: ApiDefinitionId("test_api".to_string()),
+            version: ApiVersion("1.0".to_string()),
+            routes: vec![route],
+            draft: true,
+            security: None,
+        };
+
+        let conversion = OpenApiHttpApiDefinitionRequest::from_http_api_definition_request(&req);
+        assert!(conversion.is_err());
+        let err_msg = conversion.err().unwrap();
+        assert_eq!(
+            err_msg,
+            "OpenAPI 3.0.0 does not support the CONNECT method".to_string()
+        );
+    }
+
+    #[test]
+    fn test_from_http_api_definition_request_post() {
+        // Create a dummy RouteRequest for the POST method without security or CORS
+        let route = RouteRequest {
+            method: MethodPattern::Post,
+            path: AllPathPatterns::parse("/post_test").unwrap(),
+            binding: GatewayBinding::static_binding(
+                StaticBinding::from_http_cors(HttpCors::default())
+            ),
+            security: None,
+            cors: None,
+        };
+
+        let req = HttpApiDefinitionRequest {
+            id: ApiDefinitionId("post_api".to_string()),
+            version: ApiVersion("1.1".to_string()),
+            routes: vec![route],
+            draft: true,
+            security: None,
+        };
+
+        let conversion = OpenApiHttpApiDefinitionRequest::from_http_api_definition_request(&req);
+        assert!(conversion.is_ok());
+        let openapi_req = conversion.unwrap().0;
+
+        // Check that id and version extensions are set correctly
+        assert_eq!(openapi_req.extensions.get(GOLEM_API_DEFINITION_ID_EXTENSION).unwrap(), &serde_json::Value::String("post_api".to_string()));
+        assert_eq!(openapi_req.extensions.get(GOLEM_API_DEFINITION_VERSION).unwrap(), &serde_json::Value::String("1.1".to_string()));
+
+        // Check that the path has been created with a POST operation
+        let path_item = openapi_req.paths.paths.get(&"/post_test".to_string());
+        assert!(path_item.is_some(), "Path '/post_test' should exist");
+        if let Some(openapiv3::ReferenceOr::Item(item)) = path_item {
+            assert!(item.post.is_some(), "POST operation should be set");
+        } else {
+            panic!("Path item is not properly set");
+        }
+    }
+
+    #[test]
+    fn test_from_http_api_definition_request_with_security_and_cors() {
+        // Create a dummy RouteRequest for the PUT method with security and CORS information
+        let mut cors = HttpCors::default();
+        cors.set_allow_origin("example.org").unwrap();
+
+        let route = RouteRequest {
+            method: MethodPattern::Put,
+            path: AllPathPatterns::parse("/secure_cors").unwrap(),
+            binding: GatewayBinding::static_binding(
+                StaticBinding::from_http_cors(cors.clone())
+            ),
+            security: Some(SecuritySchemeReference::new("secure-scheme".to_string())),
+            cors: Some(cors.clone()),
+        };
+
+        let req = HttpApiDefinitionRequest {
+            id: ApiDefinitionId("secure_api".to_string()),
+            version: ApiVersion("2.0".to_string()),
+            routes: vec![route],
+            draft: true,
+            security: None,
+        };
+
+        let conversion = OpenApiHttpApiDefinitionRequest::from_http_api_definition_request(&req);
+        assert!(conversion.is_ok());
+        let openapi_req = conversion.unwrap().0;
+
+        // Check extensions for id and version
+        assert_eq!(openapi_req.extensions.get(GOLEM_API_DEFINITION_ID_EXTENSION).unwrap(), &serde_json::Value::String("secure_api".to_string()));
+        assert_eq!(openapi_req.extensions.get(GOLEM_API_DEFINITION_VERSION).unwrap(), &serde_json::Value::String("2.0".to_string()));
+
+        // Check that the path has been created with a PUT operation
+        let path_item = openapi_req.paths.paths.get(&"/secure_cors".to_string());
+        assert!(path_item.is_some(), "Path '/secure_cors' should exist");
+        if let Some(openapiv3::ReferenceOr::Item(item)) = path_item {
+            assert!(item.put.is_some(), "PUT operation should be set");
+
+            // Verify that security extension is set in the operation
+            if let Some(op) = item.put.as_ref() {
+                let sec_ext = op.extensions.get("x-golem-security").expect("Security extension should be present");
+                let expected_sec = serde_json::json!([
+                    { "scheme": format!("{:?}", SecuritySchemeReference::new("secure-scheme".to_string()).security_scheme_identifier) }
+                ]);
+                assert_eq!(sec_ext, &expected_sec);
+                
+                // Verify that CORS extension is set in the operation
+                let cors_ext = op.extensions.get("x-golem-cors").expect("CORS extension should be present");
+                let expected_cors = serde_json::to_value(&cors).unwrap();
+                assert_eq!(cors_ext, &expected_cors);
+            } else {
+                panic!("PUT operation is not properly set");
+            }
+        } else {
+            panic!("Path item is not properly set");
         }
     }
 }
